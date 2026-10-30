@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.jpeg" alt="TerApp Logo" width="180" />
+</p>
+
 # TerApp 🦀
 
 > An ultra-low memory, high-performance terminal emulator and Linux environment for Android, rewritten in **Rust**.
