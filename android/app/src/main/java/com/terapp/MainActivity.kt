@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         // Create initial session
+        BootstrapManager.ensureBootstrap(this)
         createNewSession("Session 1")
 
         // Start Foreground Service so terminal sessions survive in background
@@ -57,13 +58,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createNewSession(title: String) {
-        filesDir.mkdirs()
+        val home = BootstrapManager.getHomeDir(this)
+        home.mkdirs()
         val newSession = TerminalSession(
             id = System.currentTimeMillis().toString(),
             name = title,
             cols = terminalView.cols,
             rows = terminalView.rows,
-            workingDir = filesDir
+            workingDir = home,
+            context = this
         )
         sessions.add(newSession)
 
