@@ -174,6 +174,50 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onCheckIsTextEditor(): Boolean = true
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event == null) return super.onKeyDown(keyCode, null)
+        when (keyCode) {
+            KeyEvent.KEYCODE_DEL -> {
+                session?.writeBytes(byteArrayOf(0x08))
+                return true
+            }
+            KeyEvent.KEYCODE_ENTER -> {
+                session?.writeBytes(byteArrayOf(0x0A))
+                return true
+            }
+            KeyEvent.KEYCODE_TAB -> {
+                session?.writeBytes(byteArrayOf(0x09))
+                return true
+            }
+            KeyEvent.KEYCODE_ESCAPE -> {
+                session?.writeBytes(byteArrayOf(0x1B))
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                session?.writeBytes("\u001b[A".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                session?.writeBytes("\u001b[B".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                session?.writeBytes("\u001b[D".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                session?.writeBytes("\u001b[C".toByteArray())
+                return true
+            }
+        }
+        val unicode = event.unicodeChar
+        if (unicode != 0) {
+            sendChar(unicode.toChar())
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         outAttrs.inputType = InputType.TYPE_NULL
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_ACTION_NONE

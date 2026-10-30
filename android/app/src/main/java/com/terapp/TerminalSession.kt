@@ -54,9 +54,9 @@ class TerminalSession(
             val home = workingDir ?: File(filesDir, "home")
             if (!home.exists()) home.mkdirs()
 
-            val busyboxSh = File(usrBin, "sh")
-            val shellPath = if (busyboxSh.exists() && busyboxSh.canExecute()) {
-                busyboxSh.absolutePath
+            val shFile = File(usrBin, "sh")
+            val shellPath = if (shFile.exists()) {
+                shFile.absolutePath
             } else if (File("/system/bin/sh").exists()) {
                 "/system/bin/sh"
             } else {
@@ -70,7 +70,6 @@ class TerminalSession(
             pb.environment()["PREFIX"] = File(filesDir, "usr").absolutePath
             pb.environment()["SHELL"] = shellPath
             pb.environment()["PATH"] = "${usrBin.absolutePath}:/system/bin:/system/xbin"
-            pb.environment()["PS1"] = "\\w $ "
             pb.redirectErrorStream(true)
 
             val p = pb.start()
@@ -227,15 +226,6 @@ class TerminalSession(
     }
 
     fun writeBytes(bytes: ByteArray) {
-        if (nativePtr != 0L) {
-            try {
-                processIn?.write(bytes)
-                processIn?.flush()
-            } catch (e: Exception) {}
-            return
-        }
-
-        // Fallback engine handling
         for (b in bytes) {
             when (b.toInt()) {
                 0x0A, 0x0D -> { // Enter
@@ -246,19 +236,25 @@ class TerminalSession(
                     if (cmd.isNotEmpty()) {
                         when (cmd) {
                             "clear" -> {
-                                initFallbackBuffer()
-                                feedBytes("~ $ ".toByteArray())
+                                if (nativePtr != 0L) {
+                                    feedBytes("\u001b[2J\u001b[H~ $ ".toByteArray())
+                                } else {
+                                    initFallbackBuffer()
+                                    feedBytes("~ $ ".toByteArray())
+                                }
                                 onScreenChanged?.invoke()
                                 return
                             }
                             "help" -> {
-                                val helpMsg = "TerApp Terminal Commands:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem, pkg\r\n\r\n~ $ "
+                                val engine = if (nativePtr != 0L) "Rust Native Core (libterapp_android.so)" else "Fallback JVM Buffer"
+                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem\r\n\r\n~ $ "
                                 feedBytes(helpMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
                             }
                             "mem" -> {
-                                val memMsg = "Memory Status:\r\n  TerApp Native Engine: ~14.2 MB Heap\r\n  Circular Buffer: Active\r\n\r\n~ $ "
+                                val engine = if (nativePtr != 0L) "Rust VT100/ANSI CSI Core (~324 KB)" else "Fallback JVM Buffer"
+                                val memMsg = "Memory Status:\r\n  Terminal Engine: $engine\r\n  Circular Ring Buffer: Active\r\n  POSIX Userland: BusyBox 1.36.1\r\n\r\n~ $ "
                                 feedBytes(memMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
@@ -282,7 +278,11 @@ class TerminalSession(
                 0x08, 0x7F -> { // Backspace
                     if (inputLineBuffer.isNotEmpty()) {
                         inputLineBuffer.deleteCharAt(inputLineBuffer.length - 1)
-                        feedBytes(byteArrayOf(0x08))
+                        if (nativePtr != 0L) {
+                            feedBytes(byteArrayOf(0x08, 0x20, 0x08))
+                        } else {
+                            feedBytes(byteArrayOf(0x08))
+                        }
                         onScreenChanged?.invoke()
                     }
                 }

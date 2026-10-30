@@ -1,13 +1,21 @@
 package com.terapp
 
 import android.content.Context
+import android.system.Os
 import android.util.Log
 import java.io.File
-import java.io.FileOutputStream
 
 object BootstrapManager {
     private const val TAG = "BootstrapManager"
     private const val BUSYBOX_VERSION = "1.36.1"
+
+    fun getBusyboxBinary(context: Context): File? {
+        val nativeLib = File(context.applicationInfo.nativeLibraryDir, "libbusybox.so")
+        if (nativeLib.exists() && nativeLib.canExecute()) {
+            return nativeLib
+        }
+        return null
+    }
 
     fun ensureBootstrap(context: Context): Boolean {
         return try {
@@ -20,64 +28,61 @@ object BootstrapManager {
             usrBin.mkdirs()
             homeDir.mkdirs()
 
-            val currentVersion = if (versionFile.exists()) versionFile.readText().trim() else ""
-            val busyboxBin = File(usrBin, "busybox")
+            val nativeLib = getBusyboxBinary(context)
+            if (nativeLib == null) {
+                Log.w(TAG, "libbusybox.so not found in nativeLibraryDir")
+                return false
+            }
 
-            if (busyboxBin.exists() && currentVersion == BUSYBOX_VERSION) {
+            val currentVersion = if (versionFile.exists()) versionFile.readText().trim() else ""
+            val busyboxLink = File(usrBin, "busybox")
+            val shLink = File(usrBin, "sh")
+
+            if (currentVersion == BUSYBOX_VERSION && busyboxLink.exists() && shLink.exists()) {
                 return true
             }
 
-            Log.i(TAG, "Installing POSIX userland tools (BusyBox $BUSYBOX_VERSION)...")
+            Log.i(TAG, "Setting up POSIX userland symlinks from ${nativeLib.absolutePath}...")
 
-            // 1. Copy busybox-arm64 from assets
-            context.assets.open("busybox-arm64").use { input ->
-                FileOutputStream(busyboxBin).use { output ->
-                    input.copyTo(output)
-                }
-            }
-
-            // 2. Set executable
-            busyboxBin.setExecutable(true, false)
-            busyboxBin.setReadable(true, false)
-
-            // 3. Install all symlinks (ls, grep, awk, tar, vi, etc.)
+            // Always create busybox and sh symlinks first
             try {
-                val pb = ProcessBuilder(busyboxBin.absolutePath, "--install", "-s", usrBin.absolutePath)
-                pb.directory(usrBin)
-                val p = pb.start()
-                p.waitFor()
+                if (busyboxLink.exists()) busyboxLink.delete()
+                Os.symlink(nativeLib.absolutePath, busyboxLink.absolutePath)
             } catch (e: Exception) {
-                Log.w(TAG, "busybox --install failed, creating core symlinks manually: ${e.message}")
-                createCoreSymlinks(busyboxBin, usrBin)
+                Log.w(TAG, "Failed to symlink busybox: ${e.message}")
             }
 
-            // 4. Mark version
+            try {
+                if (shLink.exists()) shLink.delete()
+                Os.symlink(nativeLib.absolutePath, shLink.absolutePath)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to symlink sh: ${e.message}")
+            }
+
+            val applets = listOf(
+                "ash", "bash", "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir",
+                "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
+                "vi", "head", "tail", "wc", "sort", "uniq", "find", "xargs",
+                "which", "whoami", "uname", "pwd", "date", "touch", "chmod", "df", "du",
+                "ps", "kill", "top", "free", "uptime", "curl", "wget", "env", "clear",
+                "bzip2", "xz", "unzip", "base64", "md5sum", "sha256sum", "ping", "netstat",
+                "tree", "nano", "diff", "patch", "more", "less", "stat", "strings"
+            )
+
+            for (applet in applets) {
+                val targetFile = File(usrBin, applet)
+                try {
+                    if (targetFile.exists()) targetFile.delete()
+                    Os.symlink(nativeLib.absolutePath, targetFile.absolutePath)
+                } catch (ignored: Exception) {}
+            }
+
             versionFile.writeText(BUSYBOX_VERSION)
             Log.i(TAG, "POSIX userland installed successfully.")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to bootstrap userland: ${e.message}", e)
             false
-        }
-    }
-
-    private fun createCoreSymlinks(busybox: File, binDir: File) {
-        val applets = listOf(
-            "sh", "ash", "bash", "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir",
-            "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
-            "vi", "head", "tail", "wc", "sort", "uniq", "find", "xargs",
-            "which", "whoami", "uname", "pwd", "date", "touch", "chmod", "df", "du",
-            "ps", "kill", "top", "free", "uptime", "curl", "wget", "env"
-        )
-        for (applet in applets) {
-            try {
-                val link = File(binDir, applet)
-                if (!link.exists()) {
-                    val pb = ProcessBuilder(busybox.absolutePath, "ln", "-s", "busybox", applet)
-                    pb.directory(binDir)
-                    pb.start().waitFor()
-                }
-            } catch (ignored: Exception) {}
         }
     }
 

@@ -8,8 +8,9 @@ object TerAppBridge {
         try {
             System.loadLibrary("terapp_android")
             isLoaded = true
+            android.util.Log.i("TerAppBridge", "TerApp native Rust engine loaded successfully: isLoaded=$isLoaded")
         } catch (e: Throwable) {
-            System.err.println("TerAppBridge: Native library not loaded: ${e.message}")
+            android.util.Log.e("TerAppBridge", "TerAppBridge: Native library not loaded: ${e.message}")
             isLoaded = false
         }
     }

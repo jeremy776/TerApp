@@ -5,5 +5,5 @@ edition = "2021"
 description = "Pseudo-terminal (PTY) and process spawner for TerApp"
 
 [dependencies]
-# Platform-specific dependencies will be added for Unix / Android
+libc = "0.2"
 
