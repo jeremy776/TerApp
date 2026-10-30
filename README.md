@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.jpeg" alt="TerApp Logo" width="180" />
+  <img src="logo.png" alt="TerApp Logo" width="180" />
 </p>
 
 # TerApp 🦀

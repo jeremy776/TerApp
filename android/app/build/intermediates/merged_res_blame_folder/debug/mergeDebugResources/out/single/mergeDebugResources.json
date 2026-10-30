@@ -4,12 +4,12 @@
         "source": "D:\\.gradle\\daemon\\8.14\\com.terapp-main-33:\\mipmap-xxhdpi\\ic_launcher_round.png"
     },
     {
-        "merged": "D:\\.gradle\\daemon\\8.14\\com.terapp-debug-31:\\mipmap-xhdpi_ic_launcher_round.png.flat",
-        "source": "D:\\.gradle\\daemon\\8.14\\com.terapp-main-33:\\mipmap-xhdpi\\ic_launcher_round.png"
-    },
-    {
         "merged": "D:\\.gradle\\daemon\\8.14\\com.terapp-debug-31:\\drawable_app_logo.png.flat",
         "source": "D:\\.gradle\\daemon\\8.14\\com.terapp-main-33:\\drawable\\app_logo.png"
+    },
+    {
+        "merged": "D:\\.gradle\\daemon\\8.14\\com.terapp-debug-31:\\mipmap-xhdpi_ic_launcher_round.png.flat",
+        "source": "D:\\.gradle\\daemon\\8.14\\com.terapp-main-33:\\mipmap-xhdpi\\ic_launcher_round.png"
     },
     {
         "merged": "D:\\.gradle\\daemon\\8.14\\com.terapp-debug-31:\\menu_menu_main.xml.flat",

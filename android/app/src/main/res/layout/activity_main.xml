@@ -18,7 +18,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@color/term_surface_dracula"
-            app:logo="@drawable/app_logo"
             app:title="@string/app_name"
             app:titleTextColor="@color/term_fg"
             app:menu="@menu/menu_main" />
