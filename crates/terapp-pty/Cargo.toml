@@ -1,0 +1,9 @@
+[package]
+name = "terapp-pty"
+version = "0.1.0"
+edition = "2021"
+description = "Pseudo-terminal (PTY) and process spawner for TerApp"
+
+[dependencies]
+# Platform-specific dependencies will be added for Unix / Android
+

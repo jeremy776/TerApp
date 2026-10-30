@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_new_session"
+        android:icon="@android:drawable/ic_input_add"
+        android:title="@string/new_session"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_wakelock"
+        android:title="@string/menu_wakelock"
+        android:checkable="true"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_theme"
+        android:title="@string/menu_theme"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_clear"
+        android:title="@string/action_clear"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_reset"
+        android:title="@string/action_reset"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_kill"
+        android:title="@string/action_kill"
+        app:showAsAction="never" />
+
+</menu>
+

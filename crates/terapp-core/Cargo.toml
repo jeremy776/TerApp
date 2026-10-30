@@ -1,0 +1,9 @@
+[package]
+name = "terapp-core"
+version = "0.1.0"
+edition = "2021"
+description = "Ultra-compact terminal emulation engine for TerApp"
+
+[dependencies]
+# We keep dependencies to absolute zero or minimal to minimize binary size & RAM overhead.
+

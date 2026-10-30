@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/terapp-core",
+    "crates/terapp-pty",
+    "crates/terapp-cli",
+    "crates/terapp-android",
+]
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-Time Optimization
+codegen-units = 1   # Maximize size reduction
+panic = "abort"     # Remove panic unwinding overhead
+strip = true        # Strip symbols from binary
+

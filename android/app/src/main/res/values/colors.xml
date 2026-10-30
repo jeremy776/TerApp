@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Backgrounds -->
+    <color name="term_bg_dracula">#282A36</color>
+    <color name="term_surface_dracula">#21222C</color>
+    <color name="term_card_dracula">#383A59</color>
+
+    <!-- Accents -->
+    <color name="term_cyan">#8BE9FD</color>
+    <color name="term_green">#50FA7B</color>
+    <color name="term_orange">#FFB86C</color>
+    <color name="term_pink">#FF79C6</color>
+    <color name="term_purple">#BD93F9</color>
+    <color name="term_red">#FF5555</color>
+    <color name="term_yellow">#F1FA8C</color>
+    <color name="term_fg">#F8F8F2</color>
+    <color name="term_comment">#6272A4</color>
+
+    <!-- App Launcher Icon Background -->
+    <color name="ic_launcher_background">#1D1D1D</color>
+
+    <!-- Key Button States -->
+    <color name="extra_key_bg">#343746</color>
+    <color name="extra_key_bg_active">#BD93F9</color>
+    <color name="extra_key_text">#F8F8F2</color>
+    <color name="extra_key_text_active">#282A36</color>
+</resources>
+

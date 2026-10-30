@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">TerApp</string>
+    <string name="session_default">Session 1</string>
+    <string name="new_session">+ New</string>
+    <string name="notification_title">TerApp Session Active</string>
+    <string name="notification_content">Terminal session is running in background</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_paste">Paste</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_kill">Kill Session</string>
+    <string name="menu_theme">Themes</string>
+    <string name="menu_wakelock">Keep Awake</string>
+</resources>
+

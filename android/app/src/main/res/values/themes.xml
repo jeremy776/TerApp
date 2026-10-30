@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TerApp" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:statusBarColor">@color/term_surface_dracula</item>
+        <item name="android:navigationBarColor">@color/term_surface_dracula</item>
+        <item name="android:windowBackground">@color/term_bg_dracula</item>
+        <item name="colorPrimary">@color/term_purple</item>
+        <item name="colorSecondary">@color/term_cyan</item>
+        <item name="colorSurface">@color/term_surface_dracula</item>
+    </style>
+</resources>
+

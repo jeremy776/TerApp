@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="extra_key_bg">#343746</color>
+    <color name="extra_key_bg_active">#BD93F9</color>
+    <color name="extra_key_text">#F8F8F2</color>
+    <color name="extra_key_text_active">#282A36</color>
+    <color name="ic_launcher_background">#1D1D1D</color>
+    <color name="term_bg_dracula">#282A36</color>
+    <color name="term_card_dracula">#383A59</color>
+    <color name="term_comment">#6272A4</color>
+    <color name="term_cyan">#8BE9FD</color>
+    <color name="term_fg">#F8F8F2</color>
+    <color name="term_green">#50FA7B</color>
+    <color name="term_orange">#FFB86C</color>
+    <color name="term_pink">#FF79C6</color>
+    <color name="term_purple">#BD93F9</color>
+    <color name="term_red">#FF5555</color>
+    <color name="term_surface_dracula">#21222C</color>
+    <color name="term_yellow">#F1FA8C</color>
+    <string name="action_clear">Clear</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_kill">Kill Session</string>
+    <string name="action_paste">Paste</string>
+    <string name="action_reset">Reset</string>
+    <string name="app_name">TerApp</string>
+    <string name="menu_theme">Themes</string>
+    <string name="menu_wakelock">Keep Awake</string>
+    <string name="new_session">+ New</string>
+    <string name="notification_content">Terminal session is running in background</string>
+    <string name="notification_title">TerApp Session Active</string>
+    <string name="session_default">Session 1</string>
+    <style name="Theme.TerApp" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:statusBarColor">@color/term_surface_dracula</item>
+        <item name="android:navigationBarColor">@color/term_surface_dracula</item>
+        <item name="android:windowBackground">@color/term_bg_dracula</item>
+        <item name="colorPrimary">@color/term_purple</item>
+        <item name="colorSecondary">@color/term_cyan</item>
+        <item name="colorSurface">@color/term_surface_dracula</item>
+    </style>
+</resources>
