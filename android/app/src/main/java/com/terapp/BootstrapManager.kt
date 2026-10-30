@@ -23,10 +23,18 @@ object BootstrapManager {
             val usrDir = File(filesDir, "usr")
             val usrBin = File(usrDir, "bin")
             val homeDir = File(filesDir, "home")
-            val versionFile = File(usrDir, ".version")
+            val markerFile = File(usrDir, ".marker")
 
             usrBin.mkdirs()
             homeDir.mkdirs()
+
+            // Create initial welcome file in home if it doesn't exist
+            val welcomeFile = File(homeDir, "welcome.txt")
+            if (!welcomeFile.exists()) {
+                try {
+                    welcomeFile.writeText("Welcome to TerApp!\nType 'help' for commands.\nPOSIX tools (BusyBox 1.36.1) and Rust VT100 engine active.\n")
+                } catch (ignored: Exception) {}
+            }
 
             val nativeLib = getBusyboxBinary(context)
             if (nativeLib == null) {
@@ -34,50 +42,79 @@ object BootstrapManager {
                 return false
             }
 
-            val currentVersion = if (versionFile.exists()) versionFile.readText().trim() else ""
+            // Path marker includes both the BusyBox version and the physical library path
+            // to automatically detect and repair broken symlinks whenever the APK is updated
+            val expectedMarker = "$BUSYBOX_VERSION:${nativeLib.absolutePath}"
+            val currentMarker = if (markerFile.exists()) markerFile.readText().trim() else ""
             val busyboxLink = File(usrBin, "busybox")
             val shLink = File(usrBin, "sh")
 
-            if (currentVersion == BUSYBOX_VERSION && busyboxLink.exists() && shLink.exists()) {
+            if (currentMarker == expectedMarker && busyboxLink.exists() && shLink.exists()) {
                 return true
             }
 
-            Log.i(TAG, "Setting up POSIX userland symlinks from ${nativeLib.absolutePath}...")
+            Log.i(TAG, "Rebuilding POSIX userland symlinks from ${nativeLib.absolutePath}...")
 
-            // Always create busybox and sh symlinks first
+            // Clean all old/broken symlinks. Calling delete() directly unlinks the file/symlink
+            // even if its target is missing (dangling symlink).
+            usrBin.listFiles()?.forEach { file ->
+                try {
+                    file.delete()
+                } catch (ignored: Exception) {}
+            }
+
+            // 1. Create main busybox symlink
             try {
-                if (busyboxLink.exists()) busyboxLink.delete()
+                busyboxLink.delete()
                 Os.symlink(nativeLib.absolutePath, busyboxLink.absolutePath)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to symlink busybox: ${e.message}")
             }
 
+            // 2. Create sh symlink
             try {
-                if (shLink.exists()) shLink.delete()
+                shLink.delete()
                 Os.symlink(nativeLib.absolutePath, shLink.absolutePath)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to symlink sh: ${e.message}")
             }
 
-            val applets = listOf(
-                "ash", "bash", "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir",
-                "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
-                "vi", "head", "tail", "wc", "sort", "uniq", "find", "xargs",
-                "which", "whoami", "uname", "pwd", "date", "touch", "chmod", "df", "du",
-                "ps", "kill", "top", "free", "uptime", "curl", "wget", "env", "clear",
-                "bzip2", "xz", "unzip", "base64", "md5sum", "sha256sum", "ping", "netstat",
-                "tree", "nano", "diff", "patch", "more", "less", "stat", "strings"
-            )
-
-            for (applet in applets) {
-                val targetFile = File(usrBin, applet)
-                try {
-                    if (targetFile.exists()) targetFile.delete()
-                    Os.symlink(nativeLib.absolutePath, targetFile.absolutePath)
-                } catch (ignored: Exception) {}
+            // 3. Install all BusyBox applets into usr/bin
+            var installSuccess = false
+            try {
+                val pb = ProcessBuilder(busyboxLink.absolutePath, "--install", "-s", usrBin.absolutePath)
+                val proc = pb.start()
+                val exitCode = proc.waitFor()
+                if (exitCode == 0) {
+                    installSuccess = true
+                    Log.i(TAG, "BusyBox applets installed via --install -s")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "busybox --install -s failed: ${e.message}")
             }
 
-            versionFile.writeText(BUSYBOX_VERSION)
+            // Fallback manual symlinks if --install failed
+            if (!installSuccess) {
+                val applets = listOf(
+                    "ash", "bash", "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir",
+                    "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
+                    "vi", "head", "tail", "wc", "sort", "uniq", "find", "xargs",
+                    "which", "whoami", "uname", "pwd", "date", "touch", "chmod", "df", "du",
+                    "ps", "kill", "top", "free", "uptime", "curl", "wget", "env", "clear",
+                    "bzip2", "xz", "unzip", "base64", "md5sum", "sha256sum", "ping", "netstat",
+                    "tree", "nano", "diff", "patch", "more", "less", "stat", "strings"
+                )
+
+                for (applet in applets) {
+                    val targetFile = File(usrBin, applet)
+                    try {
+                        targetFile.delete()
+                        Os.symlink(nativeLib.absolutePath, targetFile.absolutePath)
+                    } catch (ignored: Exception) {}
+                }
+            }
+
+            markerFile.writeText(expectedMarker)
             Log.i(TAG, "POSIX userland installed successfully.")
             true
         } catch (e: Exception) {

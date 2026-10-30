@@ -31,6 +31,7 @@ class TerminalSession(
     private var fallbackCursorX = 0
     private var fallbackCursorY = 0
     private val inputLineBuffer = StringBuilder()
+    private var currentPrompt = "~ $ "
 
     init {
         nativePtr = TerAppBridge.initTerminalSafe(cols, rows, maxScrollback)
@@ -55,7 +56,7 @@ class TerminalSession(
             if (!home.exists()) home.mkdirs()
 
             val shFile = File(usrBin, "sh")
-            val shellPath = if (shFile.exists()) {
+            val shellPath = if (shFile.exists() && shFile.canExecute()) {
                 shFile.absolutePath
             } else if (File("/system/bin/sh").exists()) {
                 "/system/bin/sh"
@@ -88,21 +89,73 @@ class TerminalSession(
             // Background reader thread from process
             Thread {
                 val buffer = ByteArray(4096)
+                val streamBuffer = StringBuilder()
+                val doneTag = "[TERAPP_DONE"
+
                 while (isRunning) {
                     try {
                         val read = processOut?.read(buffer) ?: -1
                         if (read > 0) {
-                            val data = buffer.copyOf(read)
-                            feedBytes(data)
-                            // Prompt if stream pauses
-                            try {
-                                Thread.sleep(50)
-                                if ((processOut?.available() ?: 0) == 0) {
-                                    feedBytes("\r\n~ $ ".toByteArray())
+                            val chunk = String(buffer, 0, read, StandardCharsets.UTF_8)
+                            streamBuffer.append(chunk)
+
+                            while (true) {
+                                val idx = streamBuffer.indexOf(doneTag)
+                                if (idx != -1) {
+                                    val endIdx = streamBuffer.indexOf("]", idx)
+                                    if (endIdx != -1) {
+                                        val before = streamBuffer.substring(0, idx)
+                                        val tag = streamBuffer.substring(idx, endIdx + 1)
+                                        streamBuffer.delete(0, endIdx + 1)
+
+                                        if (streamBuffer.startsWith("\r\n")) {
+                                            streamBuffer.delete(0, 2)
+                                        } else if (streamBuffer.startsWith("\n")) {
+                                            streamBuffer.delete(0, 1)
+                                        }
+
+                                        if (before.isNotEmpty()) {
+                                            feedBytes(before.toByteArray())
+                                        }
+
+                                        var promptPath = "~"
+                                        if (tag.startsWith("[TERAPP_DONE:") && tag.endsWith("]")) {
+                                            val fullPath = tag.substring("[TERAPP_DONE:".length, tag.length - 1)
+                                            val homePath = home.absolutePath
+                                            promptPath = if (fullPath == homePath) {
+                                                "~"
+                                            } else if (fullPath.startsWith("$homePath/")) {
+                                                "~/" + fullPath.removePrefix("$homePath/")
+                                            } else {
+                                                File(fullPath).name.ifEmpty { fullPath }
+                                            }
+                                        }
+
+                                        currentPrompt = "$promptPath $ "
+                                        val prompt = "\r\n$currentPrompt"
+                                        feedBytes(prompt.toByteArray())
+                                        onScreenChanged?.invoke()
+                                        continue
+                                    } else {
+                                        break
+                                    }
+                                } else {
+                                    val safeLen = streamBuffer.length - doneTag.length
+                                    if (safeLen > 0) {
+                                        val toFeed = streamBuffer.substring(0, safeLen)
+                                        streamBuffer.delete(0, safeLen)
+                                        feedBytes(toFeed.toByteArray())
+                                        onScreenChanged?.invoke()
+                                    }
+                                    break
                                 }
-                            } catch (ignored: Exception) {}
-                            onScreenChanged?.invoke()
+                            }
                         } else if (read == -1) {
+                            if (streamBuffer.isNotEmpty()) {
+                                feedBytes(streamBuffer.toString().toByteArray())
+                                streamBuffer.clear()
+                                onScreenChanged?.invoke()
+                            }
                             break
                         }
                     } catch (e: Exception) {
@@ -118,11 +171,31 @@ class TerminalSession(
     }
 
     fun feedBytes(bytes: ByteArray) {
+        val normalized = normalizeNewlines(bytes)
         if (nativePtr != 0L) {
-            TerAppBridge.feedBytesSafe(nativePtr, bytes)
+            TerAppBridge.feedBytesSafe(nativePtr, normalized)
         } else {
-            feedFallback(bytes)
+            feedFallback(normalized)
         }
+    }
+
+    private fun normalizeNewlines(bytes: ByteArray): ByteArray {
+        var needed = 0
+        for (i in bytes.indices) {
+            if (bytes[i] == 0x0A.toByte() && (i == 0 || bytes[i - 1] != 0x0D.toByte())) {
+                needed++
+            }
+        }
+        if (needed == 0) return bytes
+        val out = ByteArray(bytes.size + needed)
+        var j = 0
+        for (i in bytes.indices) {
+            if (bytes[i] == 0x0A.toByte() && (i == 0 || bytes[i - 1] != 0x0D.toByte())) {
+                out[j++] = 0x0D.toByte()
+            }
+            out[j++] = bytes[i]
+        }
+        return out
     }
 
     private fun feedFallback(bytes: ByteArray) {
@@ -237,41 +310,42 @@ class TerminalSession(
                         when (cmd) {
                             "clear" -> {
                                 if (nativePtr != 0L) {
-                                    feedBytes("\u001b[2J\u001b[H~ $ ".toByteArray())
+                                    feedBytes("\u001b[2J\u001b[H$currentPrompt".toByteArray())
                                 } else {
                                     initFallbackBuffer()
-                                    feedBytes("~ $ ".toByteArray())
+                                    feedBytes(currentPrompt.toByteArray())
                                 }
                                 onScreenChanged?.invoke()
                                 return
                             }
                             "help" -> {
                                 val engine = if (nativePtr != 0L) "Rust Native Core (libterapp_android.so)" else "Fallback JVM Buffer"
-                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem\r\n\r\n~ $ "
+                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem\r\n\r\n$currentPrompt"
                                 feedBytes(helpMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
                             }
                             "mem" -> {
                                 val engine = if (nativePtr != 0L) "Rust VT100/ANSI CSI Core (~324 KB)" else "Fallback JVM Buffer"
-                                val memMsg = "Memory Status:\r\n  Terminal Engine: $engine\r\n  Circular Ring Buffer: Active\r\n  POSIX Userland: BusyBox 1.36.1\r\n\r\n~ $ "
+                                val memMsg = "Memory Status:\r\n  Terminal Engine: $engine\r\n  Circular Ring Buffer: Active\r\n  POSIX Userland: BusyBox 1.36.1\r\n\r\n$currentPrompt"
                                 feedBytes(memMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
                             }
                             else -> {
                                 try {
-                                    processIn?.write((cmd + "\n").toByteArray())
+                                    val script = "$cmd; echo -n \"[TERAPP_DONE:\${PWD}]\n\"\n"
+                                    processIn?.write(script.toByteArray())
                                     processIn?.flush()
                                 } catch (e: Exception) {
-                                    val err = "Error writing to shell: ${e.message}\r\n~ $ "
+                                    val err = "Error writing to shell: ${e.message}\r\n$currentPrompt"
                                     feedBytes(err.toByteArray())
                                     onScreenChanged?.invoke()
                                 }
                             }
                         }
                     } else {
-                        feedBytes("~ $ ".toByteArray())
+                        feedBytes(currentPrompt.toByteArray())
                         onScreenChanged?.invoke()
                     }
                 }
@@ -288,7 +362,7 @@ class TerminalSession(
                 }
                 0x03 -> { // Ctrl+C
                     inputLineBuffer.clear()
-                    feedBytes("^C\r\n~ $ ".toByteArray())
+                    feedBytes("^C\r\n$currentPrompt".toByteArray())
                     try {
                         processIn?.write(byteArrayOf(0x03))
                         processIn?.flush()
