@@ -1,5 +1,6 @@
 package com.terapp
 
+import android.content.Context
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -12,7 +13,8 @@ class TerminalSession(
     var cols: Int = 80,
     var rows: Int = 24,
     var maxScrollback: Int = 1000,
-    var workingDir: File? = null
+    var workingDir: File? = null,
+    var context: Context? = null
 ) {
     var nativePtr: Long = 0
         private set
@@ -47,15 +49,28 @@ class TerminalSession(
 
     private fun startShellProcess() {
         try {
-            val shellPath = if (File("/system/bin/sh").exists()) "/system/bin/sh" else "sh"
-            val home = workingDir ?: File(System.getProperty("user.dir") ?: "/data/data/com.terapp/files")
+            val filesDir = context?.filesDir ?: workingDir?.parentFile ?: File("/data/data/com.terapp/files")
+            val usrBin = File(filesDir, "usr/bin")
+            val home = workingDir ?: File(filesDir, "home")
             if (!home.exists()) home.mkdirs()
+
+            val busyboxSh = File(usrBin, "sh")
+            val shellPath = if (busyboxSh.exists() && busyboxSh.canExecute()) {
+                busyboxSh.absolutePath
+            } else if (File("/system/bin/sh").exists()) {
+                "/system/bin/sh"
+            } else {
+                "sh"
+            }
 
             val pb = ProcessBuilder(shellPath)
             pb.directory(home)
             pb.environment()["TERM"] = "xterm-256color"
             pb.environment()["HOME"] = home.absolutePath
-            pb.environment()["PATH"] = "/system/bin:/system/xbin"
+            pb.environment()["PREFIX"] = File(filesDir, "usr").absolutePath
+            pb.environment()["SHELL"] = shellPath
+            pb.environment()["PATH"] = "${usrBin.absolutePath}:/system/bin:/system/xbin"
+            pb.environment()["PS1"] = "\\w $ "
             pb.redirectErrorStream(true)
 
             val p = pb.start()
@@ -67,7 +82,7 @@ class TerminalSession(
             // Initial banner
             val banner = "\u001b[1;36m========================================================\u001b[0m\r\n" +
                          "\u001b[1;32m  TerApp (Rust Core) - Native Mobile Terminal v1.0\u001b[0m\r\n" +
-                         "\u001b[0;37m  Low-Memory Native Session Active | Type 'help'\u001b[0m\r\n" +
+                         "\u001b[0;37m  POSIX Userland Active (BusyBox 1.36.1) | Type 'help'\u001b[0m\r\n" +
                          "\u001b[1;36m========================================================\u001b[0m\r\n\r\n~ $ "
             feedBytes(banner.toByteArray())
 
@@ -237,7 +252,7 @@ class TerminalSession(
                                 return
                             }
                             "help" -> {
-                                val helpMsg = "TerApp Built-in Commands:\r\n  ls, pwd, cd, whoami, uname, clear\r\n  mem, pkg\r\n\r\n~ $ "
+                                val helpMsg = "TerApp Terminal Commands:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem, pkg\r\n\r\n~ $ "
                                 feedBytes(helpMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
