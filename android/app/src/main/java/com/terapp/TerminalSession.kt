@@ -32,6 +32,7 @@ class TerminalSession(
     private var fallbackCursorY = 0
     private val inputLineBuffer = StringBuilder()
     private var currentPrompt = "~ $ "
+    private var canonicalHome: String = ""
 
     init {
         nativePtr = TerAppBridge.initTerminalSafe(cols, rows, maxScrollback)
@@ -54,6 +55,7 @@ class TerminalSession(
             val usrBin = File(filesDir, "usr/bin")
             val home = workingDir ?: File(filesDir, "home")
             if (!home.exists()) home.mkdirs()
+            canonicalHome = try { home.canonicalPath } catch (e: Exception) { home.absolutePath }
 
             val shFile = File(usrBin, "sh")
             val shellPath = if (shFile.exists() && shFile.canExecute()) {
@@ -83,7 +85,7 @@ class TerminalSession(
             val banner = "\u001b[1;36m========================================================\u001b[0m\r\n" +
                          "\u001b[1;32m  TerApp (Rust Core) - Native Mobile Terminal v1.0\u001b[0m\r\n" +
                          "\u001b[0;37m  POSIX Userland Active (BusyBox 1.36.1) | Type 'help'\u001b[0m\r\n" +
-                         "\u001b[1;36m========================================================\u001b[0m\r\n\r\n~ $ "
+                         "\u001b[1;36m========================================================\u001b[0m\r\n~ $ "
             feedBytes(banner.toByteArray())
 
             // Background reader thread from process
@@ -116,24 +118,32 @@ class TerminalSession(
 
                                         if (before.isNotEmpty()) {
                                             feedBytes(before.toByteArray())
+                                            // If output didn't end with a newline, break line before prompt
+                                            if (!before.endsWith("\n") && !before.endsWith("\r")) {
+                                                feedBytes(byteArrayOf(0x0D, 0x0A))
+                                            }
                                         }
 
                                         var promptPath = "~"
                                         if (tag.startsWith("[TERAPP_DONE:") && tag.endsWith("]")) {
-                                            val fullPath = tag.substring("[TERAPP_DONE:".length, tag.length - 1)
-                                            val homePath = home.absolutePath
-                                            promptPath = if (fullPath == homePath) {
+                                            val rawPath = tag.substring("[TERAPP_DONE:".length, tag.length - 1).trim()
+                                            val canonicalCurrent = try {
+                                                File(rawPath).canonicalPath
+                                            } catch (e: Exception) {
+                                                rawPath
+                                            }
+
+                                            promptPath = if (canonicalCurrent == canonicalHome) {
                                                 "~"
-                                            } else if (fullPath.startsWith("$homePath/")) {
-                                                "~/" + fullPath.removePrefix("$homePath/")
+                                            } else if (canonicalCurrent.startsWith("$canonicalHome/")) {
+                                                "~/" + canonicalCurrent.removePrefix("$canonicalHome/")
                                             } else {
-                                                File(fullPath).name.ifEmpty { fullPath }
+                                                File(canonicalCurrent).name.ifEmpty { canonicalCurrent }
                                             }
                                         }
 
                                         currentPrompt = "$promptPath $ "
-                                        val prompt = "\r\n$currentPrompt"
-                                        feedBytes(prompt.toByteArray())
+                                        feedBytes(currentPrompt.toByteArray())
                                         onScreenChanged?.invoke()
                                         continue
                                     } else {
@@ -320,21 +330,21 @@ class TerminalSession(
                             }
                             "help" -> {
                                 val engine = if (nativePtr != 0L) "Rust Native Core (libterapp_android.so)" else "Fallback JVM Buffer"
-                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem\r\n\r\n$currentPrompt"
+                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem\r\n$currentPrompt"
                                 feedBytes(helpMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
                             }
                             "mem" -> {
                                 val engine = if (nativePtr != 0L) "Rust VT100/ANSI CSI Core (~324 KB)" else "Fallback JVM Buffer"
-                                val memMsg = "Memory Status:\r\n  Terminal Engine: $engine\r\n  Circular Ring Buffer: Active\r\n  POSIX Userland: BusyBox 1.36.1\r\n\r\n$currentPrompt"
+                                val memMsg = "Memory Status:\r\n  Terminal Engine: $engine\r\n  Circular Ring Buffer: Active\r\n  POSIX Userland: BusyBox 1.36.1\r\n$currentPrompt"
                                 feedBytes(memMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
                             }
                             else -> {
                                 try {
-                                    val script = "$cmd; echo -n \"[TERAPP_DONE:\${PWD}]\n\"\n"
+                                    val script = "$cmd; echo -n \"[TERAPP_DONE:\${PWD}]\"\n"
                                     processIn?.write(script.toByteArray())
                                     processIn?.flush()
                                 } catch (e: Exception) {
