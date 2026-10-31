@@ -36,6 +36,34 @@ object BootstrapManager {
                 } catch (ignored: Exception) {}
             }
 
+            // Create sample scripts directory and executable scripts
+            val scriptsDir = File(homeDir, "scripts")
+            if (!scriptsDir.exists()) {
+                scriptsDir.mkdirs()
+            }
+
+            val helloScript = File(homeDir, "hello.sh")
+            if (!helloScript.exists()) {
+                try {
+                    helloScript.writeText("#!/system/bin/sh\necho \"TerApp Script Execution: Success!\"\necho \"Current directory: \$(pwd)\"\necho \"Host architecture: \$(uname -m)\"\n")
+                    helloScript.setExecutable(true, false)
+                    try {
+                        Os.chmod(helloScript.absolutePath, 493) // 0755
+                    } catch (ignored: Exception) {}
+                } catch (ignored: Exception) {}
+            }
+
+            val demoScript = File(scriptsDir, "demo.sh")
+            if (!demoScript.exists()) {
+                try {
+                    demoScript.writeText("#!/system/bin/sh\necho \"Running demo script inside scripts/ folder!\"\n")
+                    demoScript.setExecutable(true, false)
+                    try {
+                        Os.chmod(demoScript.absolutePath, 493) // 0755
+                    } catch (ignored: Exception) {}
+                } catch (ignored: Exception) {}
+            }
+
             val nativeLib = getBusyboxBinary(context)
             if (nativeLib == null) {
                 Log.w(TAG, "libbusybox.so not found in nativeLibraryDir")

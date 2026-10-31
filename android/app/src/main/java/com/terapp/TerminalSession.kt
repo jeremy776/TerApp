@@ -55,6 +55,7 @@ class TerminalSession(
             val usrBin = File(filesDir, "usr/bin")
             val home = workingDir ?: File(filesDir, "home")
             if (!home.exists()) home.mkdirs()
+            workingDir = home
             canonicalHome = try { home.canonicalPath } catch (e: Exception) { home.absolutePath }
 
             val shFile = File(usrBin, "sh")
@@ -132,6 +133,7 @@ class TerminalSession(
                                             } catch (e: Exception) {
                                                 rawPath
                                             }
+                                            workingDir = File(canonicalCurrent)
 
                                             promptPath = if (canonicalCurrent == canonicalHome) {
                                                 "~"

@@ -42,6 +42,10 @@ class TerminalView @JvmOverloads constructor(
         typeface = Typeface.MONOSPACE
         textSize = 13f * resources.displayMetrics.scaledDensity
     }
+    private val spanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.MONOSPACE
+        textSize = 13f * resources.displayMetrics.scaledDensity
+    }
 
     private val bgPaint = Paint()
     private val cursorPaint = Paint()
@@ -97,6 +101,7 @@ class TerminalView @JvmOverloads constructor(
 
     private fun updateFontMetrics() {
         textPaint.textSize = fontSizeSp * resources.displayMetrics.scaledDensity
+        spanPaint.textSize = textPaint.textSize
         val fontMetrics = textPaint.fontMetrics
         charHeight = fontMetrics.bottom - fontMetrics.top
         charAscent = -fontMetrics.top
@@ -131,13 +136,17 @@ class TerminalView @JvmOverloads constructor(
         val s = session ?: return
 
         // 2. Draw text lines
-        textPaint.color = theme.foreground
-
         for (row in 0 until rows) {
             val lineText = s.getLineText(row)
             if (lineText.isNotEmpty()) {
                 val y = row * charHeight + charAscent
-                canvas.drawText(lineText, 0f, y, textPaint)
+                val spans = TerminalColorizer.colorize(lineText, theme.foreground, s.workingDir)
+                for (span in spans) {
+                    spanPaint.color = span.color
+                    spanPaint.isFakeBoldText = span.isBold
+                    spanPaint.isUnderlineText = span.isUnderline
+                    canvas.drawText(lineText, span.start, span.end, span.start * charWidth, y, spanPaint)
+                }
             }
         }
 
