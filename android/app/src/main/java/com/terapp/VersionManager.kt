@@ -6,8 +6,8 @@ import java.net.URL
 import kotlin.concurrent.thread
 
 object VersionManager {
-    const val CURRENT_VERSION = "v1.0.0"
-    const val BUILD_CODE = 1
+    const val CURRENT_VERSION = "v1.1.0"
+    const val BUILD_CODE = 2
     const val REPO_URL = "https://github.com/jeremy776/TerApp"
     const val RELEASES_API = "https://api.github.com/repos/jeremy776/TerApp/releases/latest"
 

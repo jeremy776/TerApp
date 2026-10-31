@@ -5,7 +5,7 @@
     android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/term_bg_dracula">
+    android:background="@color/app_bg">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -16,23 +16,37 @@
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/topAppBar"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@color/term_surface_dracula"
+            android:layout_height="48dp"
+            android:background="@color/app_surface"
             app:title="@string/app_name"
-            app:titleTextColor="@color/term_fg"
+            app:titleTextColor="@color/app_text_primary"
+            app:subtitleTextColor="@color/app_text_secondary"
             app:menu="@menu/menu_main" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/app_border" />
 
         <!-- Multi-Session Tab Strip -->
         <com.google.android.material.tabs.TabLayout
             android:id="@+id/sessionTabs"
             android:layout_width="match_parent"
             android:layout_height="38dp"
-            android:background="@color/term_surface_dracula"
+            android:background="@color/app_surface"
             app:tabMode="scrollable"
-            app:tabSelectedTextColor="@color/term_cyan"
-            app:tabTextColor="@color/term_comment"
-            app:tabIndicatorColor="@color/term_cyan"
-            app:tabIndicatorHeight="2dp" />
+            app:tabGravity="start"
+            app:tabSelectedTextColor="@color/app_accent"
+            app:tabTextColor="@color/app_text_secondary"
+            app:tabIndicatorColor="@color/app_accent"
+            app:tabIndicatorHeight="2.5dp"
+            app:tabIndicatorFullWidth="false"
+            app:tabRippleColor="@color/app_surface_pressed" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/app_divider" />
 
         <!-- Terminal View Area (Supports Single Pane or Split-Screen Panes) -->
         <LinearLayout
@@ -50,12 +64,19 @@
                 android:focusable="true"
                 android:focusableInTouchMode="true" />
 
-            <View
+            <FrameLayout
                 android:id="@+id/splitDivider"
                 android:layout_width="match_parent"
-                android:layout_height="2dp"
-                android:background="@color/term_cyan"
-                android:visibility="gone" />
+                android:layout_height="8dp"
+                android:background="@color/app_surface"
+                android:visibility="gone">
+
+                <View
+                    android:layout_width="32dp"
+                    android:layout_height="3dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_split_handle" />
+            </FrameLayout>
 
             <com.terapp.TerminalView
                 android:id="@+id/terminalViewSecondary"
@@ -67,12 +88,17 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/app_border" />
+
         <!-- Modern Extra Keys Toolbar -->
         <com.terapp.ExtraKeysView
             android:id="@+id/extraKeysView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/term_surface_dracula" />
+            android:background="@color/app_surface" />
 
     </LinearLayout>
 

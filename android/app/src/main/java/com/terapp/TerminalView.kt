@@ -41,6 +41,11 @@ class TerminalView @JvmOverloads constructor(
             postInvalidate()
         }
 
+    private val padH: Float
+        get() = 10f * resources.displayMetrics.density
+    private val padV: Float
+        get() = 6f * resources.displayMetrics.density
+
     private fun spToPx(sp: Float): Float {
         return android.util.TypedValue.applyDimension(
             android.util.TypedValue.COMPLEX_UNIT_SP,
@@ -98,8 +103,10 @@ class TerminalView @JvmOverloads constructor(
 
         val displayMetrics = resources.displayMetrics
         if (charWidth > 0f && charHeight > 0f) {
-            cols = ((displayMetrics.widthPixels) / charWidth).toInt().coerceIn(24, 120)
-            rows = ((displayMetrics.heightPixels * 0.6f) / charHeight).toInt().coerceIn(10, 60)
+            val availW = (displayMetrics.widthPixels - 2f * padH).coerceAtLeast(0f)
+            val availH = (displayMetrics.heightPixels * 0.6f - 2f * padV).coerceAtLeast(0f)
+            cols = (availW / charWidth).toInt().coerceIn(24, 120)
+            rows = (availH / charHeight).toInt().coerceIn(10, 60)
         }
 
         scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -172,8 +179,10 @@ class TerminalView @JvmOverloads constructor(
 
     private fun calculateGrid() {
         if (charWidth <= 0 || charHeight <= 0 || width <= 0 || height <= 0) return
-        val newCols = (width / charWidth).toInt().coerceAtLeast(10)
-        val newRows = (height / charHeight).toInt().coerceAtLeast(5)
+        val availW = (width - 2f * padH).coerceAtLeast(0f)
+        val availH = (height - 2f * padV).coerceAtLeast(0f)
+        val newCols = (availW / charWidth).toInt().coerceAtLeast(10)
+        val newRows = (availH / charHeight).toInt().coerceAtLeast(5)
 
         if (newCols != cols || newRows != rows) {
             cols = newCols
@@ -201,6 +210,8 @@ class TerminalView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val theme = ThemeManager.currentTheme
+        val pH = padH
+        val pV = padV
 
         // 1. Fill background
         bgPaint.color = theme.background
@@ -212,15 +223,15 @@ class TerminalView @JvmOverloads constructor(
         for (row in 0 until rows) {
             val lineText = s.getLineText(row, scrollOffset)
             if (lineText.isNotEmpty()) {
-                val y = row * charHeight + charAscent
+                val y = pV + row * charHeight + charAscent
                 val displayLine = if (lineText.length > cols) lineText.substring(0, cols) else lineText
                 val spans = TerminalColorizer.colorize(displayLine, theme.foreground, s.workingDir)
                 for (span in spans) {
                     spanPaint.color = span.color
                     spanPaint.isFakeBoldText = span.isBold
                     spanPaint.isUnderlineText = span.isUnderline
-                    val startX = span.start * charWidth
-                    if (startX < width) {
+                    val startX = pH + span.start * charWidth
+                    if (startX < width - pH) {
                         canvas.drawText(displayLine, span.start, span.end, startX, y, spanPaint)
                     }
                 }
@@ -232,11 +243,12 @@ class TerminalView @JvmOverloads constructor(
             val cx = s.getCursorX().coerceIn(0, cols - 1)
             val cy = s.getCursorY().coerceIn(0, rows - 1)
 
-            val left = cx * charWidth
-            val top = cy * charHeight
-            if (left + charWidth <= width) {
+            val left = pH + cx * charWidth
+            val top = pV + cy * charHeight
+            if (left + charWidth <= width - pH + 2f) {
                 cursorPaint.color = theme.cursor
-                canvas.drawRect(left, top, left + charWidth, top + charHeight, cursorPaint)
+                val cursorRadius = 2f * resources.displayMetrics.density
+                canvas.drawRoundRect(left, top, left + charWidth, top + charHeight, cursorRadius, cursorRadius, cursorPaint)
 
                 // Invert char under cursor
                 val lineText = s.getLineText(cy, 0)
@@ -252,13 +264,14 @@ class TerminalView @JvmOverloads constructor(
         // 4. Draw scroll indicator bar when scrolled back
         val maxOffset = s.getScrollbackLength()
         if (maxOffset > 0 && scrollOffset > 0) {
-            val barWidth = 4f * resources.displayMetrics.density
+            val barWidth = 3f * resources.displayMetrics.density
             val totalContentLines = rows + maxOffset
-            val thumbHeight = (rows.toFloat() / totalContentLines * height).coerceAtLeast(32f * resources.displayMetrics.density)
-            val thumbTop = ((maxOffset - scrollOffset).toFloat() / maxOffset) * (height - thumbHeight)
-            val right = width.toFloat() - 2f * resources.displayMetrics.density
+            val availHeight = (height - 2f * pV).coerceAtLeast(1f)
+            val thumbHeight = (rows.toFloat() / totalContentLines * availHeight).coerceAtLeast(24f * resources.displayMetrics.density)
+            val thumbTop = pV + (((maxOffset - scrollOffset).toFloat() / maxOffset) * (availHeight - thumbHeight))
+            val right = width.toFloat() - 3f * resources.displayMetrics.density
             val left = right - barWidth
-            scrollBarPaint.color = 0xAA00E5FF.toInt() // semi-transparent cyan
+            scrollBarPaint.color = 0x8838BDF8.toInt() // Soft cyan thumb
             canvas.drawRoundRect(left, thumbTop, right, thumbTop + thumbHeight, barWidth / 2f, barWidth / 2f, scrollBarPaint)
         }
     }

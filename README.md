@@ -217,8 +217,8 @@ TerApp comes with automated CI/CD pipelines out of the box:
 ### 2. Automated Release Pipeline (`.github/workflows/release.yml`)
 * **Trigger via Git Tag:**
   ```bash
-  git tag v1.0.0
-  git push origin v1.0.0
+  git tag v1.1.0
+  git push origin v1.1.0
   ```
 * **Trigger Manually:** Run the **Release APK** workflow in GitHub Actions with custom tag parameters.
 * **Automatic Outputs:**
@@ -262,6 +262,13 @@ TerApp comes with automated CI/CD pipelines out of the box:
   - [x] Split-screen / dual terminal pane support with independent shells
   - [x] One-tap screen clipboard Copy & Paste integration
   - [x] GitHub Actions CI/CD workflows for automated tests and APK releases
+
+- [x] **Milestone 7: Anti-Slop Modern UI/UX Redesign & Reflow Engine (v1.1.0)**
+  - [x] Anti-slop modern soft dark design system (disciplined palette, comfortable touch targets, tactile elevation)
+  - [x] Breathable terminal insets and soft rounded cursor styling
+  - [x] Ergonomic ExtraKeys toolbar with tactile pill keys and modifier toggle indicators
+  - [x] Refined multi-session tab navigation and native split pane divider handle
+  - [x] Dynamic text wrapping and responsive terminal column calculation
 
 ---
 

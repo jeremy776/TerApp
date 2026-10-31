@@ -163,7 +163,7 @@ object BootstrapManager {
                 BUSYBOX="${nativeLib.absolutePath}"
 
                 show_help() {
-                    echo "TerApp Package Manager (pkg) v1.0.0"
+                    echo "TerApp Package Manager (pkg) ${VersionManager.CURRENT_VERSION}"
                     echo "Usage: pkg <command> [arguments]"
                     echo ""
                     echo "Commands:"

@@ -3,4 +3,3 @@
     <item android:state_activated="true" android:color="@color/extra_key_text_active" />
     <item android:color="@color/extra_key_text" />
 </selector>
-

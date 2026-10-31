@@ -1,9 +1,10 @@
 package com.terapp
 
 import android.content.Context
+import android.graphics.Typeface
 import android.util.AttributeSet
-import android.view.HapticFeedbackConstants
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import com.google.android.material.button.MaterialButton
@@ -14,10 +15,14 @@ class ExtraKeysView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : HorizontalScrollView(context, attrs, defStyleAttr) {
 
+    private val density = resources.displayMetrics.density
+
     private val container = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(12, 6, 12, 6)
+        val padH = (6 * density).toInt()
+        val padV = (4 * density).toInt()
+        setPadding(padH, padV, padH, padV)
     }
 
     var isCtrlActive: Boolean = false
@@ -32,34 +37,44 @@ class ExtraKeysView @JvmOverloads constructor(
 
     init {
         isHorizontalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
         addView(container)
         setupKeys()
     }
 
     private fun setupKeys() {
         val keys = listOf(
-            "ESC", "TAB", "CTRL", "ALT", "|", "/", "-", "_", "~", "↑", "↓", "←", "→"
+            "ESC", "TAB", "CTRL", "ALT", "|", "/", "-", "_", "~", ":", "↑", "↓", "←", "→"
         )
+
+        val btnHeight = (38 * density).toInt()
+        val padH = (12 * density).toInt()
+        val marginH = (3 * density).toInt()
+        val marginV = (4 * density).toInt()
+        val cornerRadiusPx = (8 * density).toInt()
 
         for (key in keys) {
             val btn = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
                 text = key
                 textSize = 12f
+                typeface = Typeface.MONOSPACE
                 isAllCaps = false
                 insetTop = 0
                 insetBottom = 0
-                cornerRadius = 16
                 minWidth = 0
                 minimumWidth = 0
-                setPadding(28, 16, 28, 16)
+                minHeight = 0
+                minimumHeight = 0
+                cornerRadius = cornerRadiusPx
+                setPadding(padH, 0, padH, 0)
                 setTextColor(context.getColorStateList(R.color.bg_extra_key_text))
                 setBackgroundResource(R.drawable.bg_extra_key)
 
                 val params = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
+                    btnHeight
                 ).apply {
-                    setMargins(6, 4, 6, 4)
+                    setMargins(marginH, marginV, marginH, marginV)
                 }
                 layoutParams = params
 
@@ -88,7 +103,7 @@ class ExtraKeysView @JvmOverloads constructor(
             }
             else -> {
                 onKeyAction?.invoke(key)
-                // Auto-reset single modifiers after use unless double-locked
+                // Auto-reset single modifiers after use unless explicitly preserved
                 if (isCtrlActive) {
                     isCtrlActive = false
                     ctrlButton?.isActivated = false
@@ -115,4 +130,3 @@ class ExtraKeysView @JvmOverloads constructor(
         return Pair(ctrl, alt)
     }
 }
-

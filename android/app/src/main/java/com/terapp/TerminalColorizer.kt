@@ -3,19 +3,19 @@ package com.terapp
 import java.io.File
 
 object TerminalColors {
-    const val PROMPT_PATH = 0xFF00E5FF.toInt()     // Vibrant Cyan
-    const val PROMPT_SYMBOL = 0xFFFFD54F.toInt()   // Amber Gold
-    const val COMMAND = 0xFF00E676.toInt()         // Vibrant Green
-    const val EXECUTABLE = 0xFF2ECC71.toInt()      // Emerald Green
-    const val FOLDER = 0xFF42A5F5.toInt()          // Sky Blue
-    const val OPTION = 0xFFFFA726.toInt()          // Warm Orange
-    const val STRING = 0xFFFFF176.toInt()          // Pale Yellow
-    const val OPERATOR = 0xFFBA68C8.toInt()        // Lavender / Purple
-    const val NUMBER = 0xFFFF8A65.toInt()          // Coral Orange
-    const val ARCHIVE = 0xFFFF5252.toInt()         // Red
-    const val ERROR = 0xFFFF5252.toInt()           // Red
-    const val BANNER_BORDER = 0xFF00E5FF.toInt()   // Cyan
-    const val BANNER_TITLE = 0xFF00E676.toInt()    // Bright Green
+    const val PROMPT_PATH = 0xFF38BDF8.toInt()     // Soft Sky Cyan
+    const val PROMPT_SYMBOL = 0xFFFBBF24.toInt()   // Soft Warm Amber
+    const val COMMAND = 0xFF34D399.toInt()         // Soft Emerald
+    const val EXECUTABLE = 0xFF2DD4BF.toInt()      // Soft Teal
+    const val FOLDER = 0xFF60A5FA.toInt()          // Soft Slate Blue
+    const val OPTION = 0xFFFB923C.toInt()          // Soft Warm Orange
+    const val STRING = 0xFFFDE047.toInt()          // Soft Cream Yellow
+    const val OPERATOR = 0xFFA78BFA.toInt()        // Soft Lavender
+    const val NUMBER = 0xFFF472B6.toInt()          // Soft Rose
+    const val ARCHIVE = 0xFFF87171.toInt()         // Soft Coral Red
+    const val ERROR = 0xFFF87171.toInt()           // Soft Coral Red
+    const val BANNER_BORDER = 0xFF38BDF8.toInt()   // Soft Sky Cyan
+    const val BANNER_TITLE = 0xFF34D399.toInt()    // Soft Emerald
 }
 
 data class ColorSpan(

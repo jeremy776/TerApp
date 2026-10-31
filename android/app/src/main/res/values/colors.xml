@@ -1,28 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Backgrounds -->
-    <color name="term_bg_dracula">#282A36</color>
-    <color name="term_surface_dracula">#21222C</color>
-    <color name="term_card_dracula">#383A59</color>
+    <!-- Anti-Slop Modern Soft Dark Palette -->
+    <!-- Surfaces & Ground -->
+    <color name="app_bg">#0E1117</color>               <!-- Deep neutral slate ground -->
+    <color name="app_surface">#161B22</color>          <!-- Elevated surface (appbar, tab bar) -->
+    <color name="app_surface_variant">#1F2430</color>  <!-- Tactile surface for keys & cards -->
+    <color name="app_surface_pressed">#283141</color>  <!-- Tactile touch state -->
+    <color name="app_border">#262E3B</color>           <!-- Subtle structural divider -->
+    <color name="app_border_focused">#38BDF8</color>   <!-- Soft focus line -->
+    <color name="app_divider">#1B202A</color>          <!-- Inner divider -->
 
-    <!-- Accents -->
-    <color name="term_cyan">#8BE9FD</color>
-    <color name="term_green">#50FA7B</color>
-    <color name="term_orange">#FFB86C</color>
-    <color name="term_pink">#FF79C6</color>
-    <color name="term_purple">#BD93F9</color>
-    <color name="term_red">#FF5555</color>
-    <color name="term_yellow">#F1FA8C</color>
-    <color name="term_fg">#F8F8F2</color>
-    <color name="term_comment">#6272A4</color>
+    <!-- Text & Content Hierarchy -->
+    <color name="app_text_primary">#E6EDF3</color>     <!-- High-contrast readable text -->
+    <color name="app_text_secondary">#8B949E</color>   <!-- Muted slate subtitle/tab text -->
+    <color name="app_text_tertiary">#64748B</color>    <!-- Muted label / hint -->
+    <color name="app_text_inverse">#0A0D12</color>     <!-- For active badge/key text -->
+
+    <!-- Single Deliberate Accent & Accompanying Tones -->
+    <color name="app_accent">#38BDF8</color>           <!-- Calm, modern developer cyan -->
+    <color name="app_accent_soft">#163354</color>      <!-- Subtle accent background tint -->
+    <color name="app_success">#34D399</color>          <!-- Soft Emerald -->
+    <color name="app_warning">#FBBF24</color>          <!-- Warm Amber -->
+    <color name="app_danger">#F87171</color>           <!-- Soft Coral Red -->
+
+    <!-- Split Divider Handle -->
+    <color name="split_divider_handle">#475569</color>
+
+    <!-- Legacy Dracula & Aliases for Compatibility -->
+    <color name="term_bg_dracula">#0E1117</color>
+    <color name="term_surface_dracula">#161B22</color>
+    <color name="term_card_dracula">#1F2430</color>
+    <color name="term_fg">#E6EDF3</color>
+    <color name="term_comment">#8B949E</color>
+    <color name="term_cyan">#38BDF8</color>
+    <color name="term_green">#34D399</color>
+    <color name="term_orange">#FB923C</color>
+    <color name="term_pink">#F472B6</color>
+    <color name="term_purple">#A78BFA</color>
+    <color name="term_red">#F87171</color>
+    <color name="term_yellow">#FDE047</color>
 
     <!-- App Launcher Icon Background -->
-    <color name="ic_launcher_background">#1D1D1D</color>
+    <color name="ic_launcher_background">#0E1117</color>
 
-    <!-- Key Button States -->
-    <color name="extra_key_bg">#343746</color>
-    <color name="extra_key_bg_active">#BD93F9</color>
-    <color name="extra_key_text">#F8F8F2</color>
-    <color name="extra_key_text_active">#282A36</color>
+    <!-- Extra Keys Toolbar States -->
+    <color name="extra_key_bg">#1E2430</color>
+    <color name="extra_key_bg_pressed">#283141</color>
+    <color name="extra_key_bg_active">#38BDF8</color>
+    <color name="extra_key_border">#2D3546</color>
+    <color name="extra_key_text">#CBD5E1</color>
+    <color name="extra_key_text_active">#0A0D12</color>
 </resources>
-

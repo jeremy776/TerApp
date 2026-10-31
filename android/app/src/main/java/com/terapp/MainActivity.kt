@@ -247,7 +247,7 @@ class MainActivity : AppCompatActivity() {
         val themeNames = ThemeManager.THEMES.map { it.name }.toTypedArray()
         val currentIndex = ThemeManager.THEMES.indexOf(ThemeManager.currentTheme)
 
-        AlertDialog.Builder(this)
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
             .setTitle(R.string.menu_theme)
             .setSingleChoiceItems(themeNames, currentIndex) { dialog, which ->
                 ThemeManager.currentTheme = ThemeManager.THEMES[which]
@@ -261,18 +261,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAboutDialog() {
         val arch = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-        val dialog = AlertDialog.Builder(this)
+        val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
             .setTitle("TerApp ${VersionManager.CURRENT_VERSION}")
             .setMessage(
-                "TerApp Mobile Terminal (Rust Core)\n\n" +
+                "Modern Mobile Terminal\n\n" +
                 "• Version: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})\n" +
                 "• Architecture: $arch\n" +
                 "• Engine: Rust Native VT100 / ANSI CSI Parser\n" +
                 "• Userland: BusyBox 1.36.1 POSIX + pkg Manager\n" +
                 "• Repository: github.com/jeremy776/TerApp\n\n" +
-                "Checking for latest version..."
+                "Checking release status..."
             )
-            .setPositiveButton("OK", null)
+            .setPositiveButton("Close", null)
             .setNeutralButton("View Releases") { _, _ ->
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
@@ -286,12 +286,12 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (dialog.isShowing) {
                     val statusText = if (isLatest) {
-                        "✔ You are running the latest version (${VersionManager.CURRENT_VERSION})."
+                        "Status: You are running the latest version (${VersionManager.CURRENT_VERSION})."
                     } else {
-                        "⚡ Update Available: $latestVer\nInstalled: ${VersionManager.CURRENT_VERSION}\nTap 'View Releases' to download."
+                        "Update Available: $latestVer\nInstalled: ${VersionManager.CURRENT_VERSION}\nTap 'View Releases' to download."
                     }
                     dialog.setMessage(
-                        "TerApp Mobile Terminal (Rust Core)\n\n" +
+                        "Modern Mobile Terminal\n\n" +
                         "• Version: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})\n" +
                         "• Architecture: $arch\n" +
                         "• Engine: Rust Native VT100 / ANSI CSI Parser\n" +
