@@ -1,0 +1,125 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+      draft:
+        description: 'Create draft release'
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust Tests
+        run: cargo test --workspace --verbose
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Determine Release Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building for Tag: $TAG"
+
+      - name: Build Debug & Release APKs
+        working-directory: android
+        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Prepare Artifacts & Calculate Checksums
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          mkdir -p release-artifacts
+
+          # Copy and rename release APK
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk release-artifacts/TerApp-${TAG}-release.apk
+          elif [ -f android/app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release-unsigned.apk release-artifacts/TerApp-${TAG}-release.apk
+          fi
+
+          # Copy and rename debug APK
+          if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk release-artifacts/TerApp-${TAG}-debug.apk
+          fi
+
+          # Generate SHA256 checksums
+          cd release-artifacts
+          sha256sum TerApp-*.apk > sha256sums.txt
+          cat sha256sums.txt
+          cd ..
+
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TerApp-Release-APKs
+          path: release-artifacts/*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: TerApp ${{ steps.vars.outputs.tag }}
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          files: release-artifacts/*
+          generate_release_notes: true
+          body: |
+            ### 🦀 TerApp Release ${{ steps.vars.outputs.tag }}
+
+            **TerApp** is an ultra-low memory, high-performance terminal emulator and POSIX Linux environment for Android rewritten with a native Rust VT100/ANSI CSI core.
+
+            #### 📦 Included APKs:
+            * **Release APK:** `TerApp-${{ steps.vars.outputs.tag }}-release.apk` (Minified, R8 optimized with ProGuard rules, ~3.6 MB)
+            * **Debug APK:** `TerApp-${{ steps.vars.outputs.tag }}-debug.apk` (Includes debugging symbols)
+            * **Checksums:** `sha256sums.txt`
+
+            #### 🚀 Highlights:
+            * **Native Rust VT100 Engine** (`libterapp_android.so`): CSI parser & circular ring scrollback buffer.
+            * **Built-in POSIX Userland (BusyBox 1.36.1)**: Self-healing symlink engine in `usr/bin/` with 100+ applets (`ls`, `grep`, `vi`, `tar`, `curl`, `wget`, etc.).
+            * **Lightweight Package Manager (`pkg`)**: Built-in userland helper for listing, searching, installing applets and system diagnostics (`pkg doctor`).
+            * **Extended Color Themes**: Dracula, Catppuccin Mocha, One Dark, Nord, Monokai, Solarized Dark, Solarized Light, and Gruvbox Dark.
+            * **Gesture Scrolling & Fling**: Momentum-based inertial scrolling with virtual cyan scrollbar indicator.
+            * **Clipboard Support**: Copy screen and paste directly from action menu.
+            * **Split-Screen Panes**: Dual simultaneous terminal sessions side-by-side.
+            * **Background Foreground Service**: Optional WakeLock support to keep long-running processes alive.
