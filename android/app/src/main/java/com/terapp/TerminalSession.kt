@@ -36,17 +36,17 @@ class TerminalSession(
 
     init {
         nativePtr = TerAppBridge.initTerminalSafe(cols, rows, maxScrollback)
-        if (nativePtr == 0L) {
-            initFallbackBuffer()
-        }
+        initFallbackBuffer()
         startShellProcess()
     }
 
-    private fun initFallbackBuffer() {
-        fallbackLines.clear()
-        fallbackLines.add(StringBuilder())
-        fallbackCursorX = 0
-        fallbackCursorY = 0
+    fun initFallbackBuffer() {
+        synchronized(fallbackLines) {
+            fallbackLines.clear()
+            fallbackLines.add(StringBuilder())
+            fallbackCursorX = 0
+            fallbackCursorY = 0
+        }
     }
 
     private fun startShellProcess() {
@@ -184,10 +184,9 @@ class TerminalSession(
 
     fun feedBytes(bytes: ByteArray) {
         val normalized = normalizeNewlines(bytes)
+        feedFallback(normalized)
         if (nativePtr != 0L) {
             TerAppBridge.feedBytesSafe(nativePtr, normalized)
-        } else {
-            feedFallback(normalized)
         }
     }
 
@@ -211,76 +210,92 @@ class TerminalSession(
     }
 
     private fun feedFallback(bytes: ByteArray) {
-        val str = String(bytes, StandardCharsets.UTF_8)
-        var i = 0
-        while (i < str.length) {
-            val c = str[i]
-            if (c == '\u001b') {
-                // Skip ANSI escape sequences
-                var j = i + 1
-                if (j < str.length && (str[j] == '[' || str[j] == ']' || str[j] == '(')) {
-                    j++
-                    while (j < str.length && !str[j].isLetter() && str[j] != '~') {
+        synchronized(fallbackLines) {
+            val str = String(bytes, StandardCharsets.UTF_8)
+            var i = 0
+            while (i < str.length) {
+                val c = str[i]
+                if (c == '\u001b') {
+                    // Skip ANSI escape sequences
+                    var j = i + 1
+                    if (j < str.length && (str[j] == '[' || str[j] == ']' || str[j] == '(')) {
                         j++
+                        while (j < str.length && !str[j].isLetter() && str[j] != '~') {
+                            j++
+                        }
+                        if (j < str.length) j++
                     }
-                    if (j < str.length) j++
-                }
-                i = j
-                continue
-            } else if (c == '\r') {
-                fallbackCursorX = 0
-            } else if (c == '\n') {
-                fallbackCursorX = 0
-                fallbackCursorY++
-                if (fallbackCursorY >= fallbackLines.size) {
-                    fallbackLines.add(StringBuilder())
-                }
-            } else if (c == '\b') {
-                if (fallbackCursorX > 0) {
-                    fallbackCursorX--
-                    val line = getFallbackLine(fallbackCursorY)
-                    if (fallbackCursorX < line.length) {
-                        line.deleteCharAt(fallbackCursorX)
-                    }
-                }
-            } else if (c.code in 32..126 || c.code > 127) {
-                val line = getFallbackLine(fallbackCursorY)
-                while (line.length < fallbackCursorX) {
-                    line.append(' ')
-                }
-                if (fallbackCursorX < line.length) {
-                    line.setCharAt(fallbackCursorX, c)
-                } else {
-                    line.append(c)
-                }
-                fallbackCursorX++
-                if (fallbackCursorX >= cols) {
+                    i = j
+                    continue
+                } else if (c == '\r') {
+                    fallbackCursorX = 0
+                } else if (c == '\n') {
                     fallbackCursorX = 0
                     fallbackCursorY++
                     if (fallbackCursorY >= fallbackLines.size) {
                         fallbackLines.add(StringBuilder())
                     }
+                    while (fallbackLines.size > maxScrollback + rows) {
+                        fallbackLines.removeAt(0)
+                        if (fallbackCursorY > 0) fallbackCursorY--
+                    }
+                } else if (c == '\b') {
+                    if (fallbackCursorX > 0) {
+                        fallbackCursorX--
+                        val line = getFallbackLine(fallbackCursorY)
+                        if (fallbackCursorX < line.length) {
+                            line.deleteCharAt(fallbackCursorX)
+                        }
+                    }
+                } else if (c.code in 32..126 || c.code > 127) {
+                    val line = getFallbackLine(fallbackCursorY)
+                    while (line.length < fallbackCursorX) {
+                        line.append(' ')
+                    }
+                    if (fallbackCursorX < line.length) {
+                        line.setCharAt(fallbackCursorX, c)
+                    } else {
+                        line.append(c)
+                    }
+                    fallbackCursorX++
+                    if (fallbackCursorX >= cols) {
+                        fallbackCursorX = 0
+                        fallbackCursorY++
+                        if (fallbackCursorY >= fallbackLines.size) {
+                            fallbackLines.add(StringBuilder())
+                        }
+                        while (fallbackLines.size > maxScrollback + rows) {
+                            fallbackLines.removeAt(0)
+                            if (fallbackCursorY > 0) fallbackCursorY--
+                        }
+                    }
                 }
+                i++
             }
-            i++
         }
     }
 
     private fun getFallbackLine(row: Int): StringBuilder {
-        while (fallbackLines.size <= row) {
-            fallbackLines.add(StringBuilder())
+        synchronized(fallbackLines) {
+            while (fallbackLines.size <= row) {
+                fallbackLines.add(StringBuilder())
+            }
+            return fallbackLines[row]
         }
-        return fallbackLines[row]
     }
 
-    fun getLineText(row: Int): String {
-        return if (nativePtr != 0L) {
-            TerAppBridge.getLineTextSafe(nativePtr, row)
-        } else {
+    fun getScrollbackLength(): Int {
+        synchronized(fallbackLines) {
+            return (fallbackLines.size - rows).coerceAtLeast(0)
+        }
+    }
+
+    fun getLineText(row: Int, scrollOffset: Int = 0): String {
+        synchronized(fallbackLines) {
             val total = fallbackLines.size
             val startRow = (total - rows).coerceAtLeast(0)
-            val targetIndex = startRow + row
-            if (targetIndex in 0 until total) {
+            val targetIndex = startRow + row - scrollOffset
+            return if (targetIndex in 0 until total) {
                 fallbackLines[targetIndex].toString()
             } else {
                 ""
@@ -321,12 +336,11 @@ class TerminalSession(
                     if (cmd.isNotEmpty()) {
                         when (cmd) {
                             "clear" -> {
+                                initFallbackBuffer()
                                 if (nativePtr != 0L) {
-                                    feedBytes("\u001b[2J\u001b[H$currentPrompt".toByteArray())
-                                } else {
-                                    initFallbackBuffer()
-                                    feedBytes(currentPrompt.toByteArray())
+                                    TerAppBridge.feedBytesSafe(nativePtr, "\u001b[2J\u001b[H".toByteArray())
                                 }
+                                feedBytes(currentPrompt.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
                             }

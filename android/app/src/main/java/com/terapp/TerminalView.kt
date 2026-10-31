@@ -59,6 +59,13 @@ class TerminalView @JvmOverloads constructor(
     var rows: Int = 24
         private set
 
+    // Scrolling support
+    var scrollOffset: Int = 0
+        private set
+    private var scrollAccumulator = 0f
+    private val scroller by lazy { android.widget.Scroller(context) }
+    private val scrollBarPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
     // Cursor blink
     private var cursorVisible = true
     private val blinkHandler = Handler(Looper.getMainLooper())
@@ -88,11 +95,46 @@ class TerminalView @JvmOverloads constructor(
         })
 
         gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
             override fun onSingleTapUp(e: MotionEvent): Boolean {
+                if (scrollOffset > 0) {
+                    scrollToBottom()
+                }
                 requestFocus()
                 val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
                 imm?.showSoftInput(this@TerminalView, InputMethodManager.SHOW_IMPLICIT)
                 return true
+            }
+
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                if (scaleDetector.isInProgress) return false
+                val s = session ?: return false
+                val maxOffset = s.getScrollbackLength()
+                if (maxOffset > 0 && charHeight > 0f) {
+                    scrollAccumulator += distanceY
+                    val deltaLines = (-scrollAccumulator / charHeight).toInt()
+                    if (deltaLines != 0) {
+                        scrollOffset = (scrollOffset + deltaLines).coerceIn(0, maxOffset)
+                        scrollAccumulator += deltaLines * charHeight
+                        postInvalidate()
+                    }
+                    return true
+                }
+                return false
+            }
+
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                if (scaleDetector.isInProgress) return false
+                val s = session ?: return false
+                val maxOffset = s.getScrollbackLength()
+                if (maxOffset > 0 && charHeight > 0f) {
+                    val velocityLines = (-velocityY / (charHeight * 6f)).toInt()
+                    scroller.fling(0, scrollOffset, 0, velocityLines, 0, 0, 0, maxOffset)
+                    postInvalidateOnAnimation()
+                    return true
+                }
+                return false
             }
         })
 
@@ -125,6 +167,22 @@ class TerminalView @JvmOverloads constructor(
         }
     }
 
+    override fun computeScroll() {
+        super.computeScroll()
+        if (scroller.computeScrollOffset()) {
+            scrollOffset = scroller.currY
+            postInvalidateOnAnimation()
+        }
+    }
+
+    fun scrollToBottom() {
+        if (scrollOffset != 0) {
+            scrollOffset = 0
+            scroller.forceFinished(true)
+            postInvalidate()
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val theme = ThemeManager.currentTheme
@@ -135,9 +193,9 @@ class TerminalView @JvmOverloads constructor(
 
         val s = session ?: return
 
-        // 2. Draw text lines
+        // 2. Draw text lines with scrollOffset
         for (row in 0 until rows) {
-            val lineText = s.getLineText(row)
+            val lineText = s.getLineText(row, scrollOffset)
             if (lineText.isNotEmpty()) {
                 val y = row * charHeight + charAscent
                 val spans = TerminalColorizer.colorize(lineText, theme.foreground, s.workingDir)
@@ -150,8 +208,8 @@ class TerminalView @JvmOverloads constructor(
             }
         }
 
-        // 3. Draw blinking cursor
-        if (cursorVisible) {
+        // 3. Draw blinking cursor (only visible when viewing active prompt at bottom)
+        if (cursorVisible && scrollOffset == 0) {
             val cx = s.getCursorX()
             val cy = s.getCursorY()
 
@@ -162,7 +220,7 @@ class TerminalView @JvmOverloads constructor(
                 canvas.drawRect(left, top, left + charWidth, top + charHeight, cursorPaint)
 
                 // Invert char under cursor
-                val lineText = s.getLineText(cy)
+                val lineText = s.getLineText(cy, 0)
                 if (cx < lineText.length) {
                     val ch = lineText[cx].toString()
                     textPaint.color = theme.background
@@ -170,6 +228,19 @@ class TerminalView @JvmOverloads constructor(
                     textPaint.color = theme.foreground
                 }
             }
+        }
+
+        // 4. Draw scroll indicator bar when scrolled back
+        val maxOffset = s.getScrollbackLength()
+        if (maxOffset > 0 && scrollOffset > 0) {
+            val barWidth = 4f * resources.displayMetrics.density
+            val totalContentLines = rows + maxOffset
+            val thumbHeight = (rows.toFloat() / totalContentLines * height).coerceAtLeast(32f * resources.displayMetrics.density)
+            val thumbTop = ((maxOffset - scrollOffset).toFloat() / maxOffset) * (height - thumbHeight)
+            val right = width.toFloat() - 2f * resources.displayMetrics.density
+            val left = right - barWidth
+            scrollBarPaint.color = 0xAA00E5FF.toInt() // semi-transparent cyan
+            canvas.drawRoundRect(left, thumbTop, right, thumbTop + thumbHeight, barWidth / 2f, barWidth / 2f, scrollBarPaint)
         }
     }
 
@@ -185,6 +256,7 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (event == null) return super.onKeyDown(keyCode, null)
+        scrollToBottom()
         when (keyCode) {
             KeyEvent.KEYCODE_DEL -> {
                 session?.writeBytes(byteArrayOf(0x08))
@@ -242,6 +314,7 @@ class TerminalView @JvmOverloads constructor(
             }
 
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                scrollToBottom()
                 if (beforeLength > 0) {
                     session?.writeBytes(byteArrayOf(0x08)) // Backspace
                 }
@@ -250,6 +323,7 @@ class TerminalView @JvmOverloads constructor(
 
             override fun sendKeyEvent(event: KeyEvent?): Boolean {
                 if (event?.action == KeyEvent.ACTION_DOWN) {
+                    scrollToBottom()
                     when (event.keyCode) {
                         KeyEvent.KEYCODE_DEL -> {
                             session?.writeBytes(byteArrayOf(0x08))
@@ -297,6 +371,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun sendChar(c: Char) {
+        scrollToBottom()
         val (ctrl, alt) = extraKeysView?.consumeModifiers() ?: Pair(false, false)
 
         if (ctrl) {
@@ -320,6 +395,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun sendSpecialKey(key: String) {
+        scrollToBottom()
         when (key) {
             "ESC" -> session?.writeBytes(byteArrayOf(0x1B))
             "TAB" -> session?.writeBytes(byteArrayOf(0x09))
