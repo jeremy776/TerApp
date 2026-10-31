@@ -237,6 +237,7 @@ object BootstrapManager {
                         ;;
                     doctor)
                         echo "================ TerApp Doctor ================"
+                        echo "TerApp: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})"
                         echo "OS: ${'$'}(uname -s -r 2>/dev/null || echo Android)"
                         echo "Architecture: ${'$'}(uname -m 2>/dev/null || echo aarch64)"
                         echo "BusyBox: ${'$'}("${'$'}BUSYBOX" | head -n 1 2>/dev/null)"

@@ -23,6 +23,9 @@ class TerminalView @JvmOverloads constructor(
         set(value) {
             field = value
             field?.onScreenChanged = { postInvalidate() }
+            if (cols > 0 && rows > 0) {
+                field?.resize(cols, rows)
+            }
             requestLayout()
             postInvalidate()
         }
@@ -92,6 +95,12 @@ class TerminalView @JvmOverloads constructor(
         isFocusableInTouchMode = true
 
         updateFontMetrics()
+
+        val displayMetrics = resources.displayMetrics
+        if (charWidth > 0f && charHeight > 0f) {
+            cols = ((displayMetrics.widthPixels) / charWidth).toInt().coerceIn(24, 120)
+            rows = ((displayMetrics.heightPixels * 0.6f) / charHeight).toInt().coerceIn(10, 60)
+        }
 
         scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -204,25 +213,29 @@ class TerminalView @JvmOverloads constructor(
             val lineText = s.getLineText(row, scrollOffset)
             if (lineText.isNotEmpty()) {
                 val y = row * charHeight + charAscent
-                val spans = TerminalColorizer.colorize(lineText, theme.foreground, s.workingDir)
+                val displayLine = if (lineText.length > cols) lineText.substring(0, cols) else lineText
+                val spans = TerminalColorizer.colorize(displayLine, theme.foreground, s.workingDir)
                 for (span in spans) {
                     spanPaint.color = span.color
                     spanPaint.isFakeBoldText = span.isBold
                     spanPaint.isUnderlineText = span.isUnderline
-                    canvas.drawText(lineText, span.start, span.end, span.start * charWidth, y, spanPaint)
+                    val startX = span.start * charWidth
+                    if (startX < width) {
+                        canvas.drawText(displayLine, span.start, span.end, startX, y, spanPaint)
+                    }
                 }
             }
         }
 
         // 3. Draw blinking cursor (only visible when viewing active prompt at bottom)
         if (cursorVisible && scrollOffset == 0) {
-            val cx = s.getCursorX()
-            val cy = s.getCursorY()
+            val cx = s.getCursorX().coerceIn(0, cols - 1)
+            val cy = s.getCursorY().coerceIn(0, rows - 1)
 
-            if (cx in 0 until cols && cy in 0 until rows) {
+            val left = cx * charWidth
+            val top = cy * charHeight
+            if (left + charWidth <= width) {
                 cursorPaint.color = theme.cursor
-                val left = cx * charWidth
-                val top = cy * charHeight
                 canvas.drawRect(left, top, left + charWidth, top + charHeight, cursorPaint)
 
                 // Invert char under cursor

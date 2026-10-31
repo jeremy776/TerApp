@@ -10,7 +10,7 @@ import java.util.Collections
 class TerminalSession(
     val id: String,
     var name: String,
-    var cols: Int = 80,
+    var cols: Int = 45,
     var rows: Int = 24,
     var maxScrollback: Int = 1000,
     var workingDir: File? = null,
@@ -49,6 +49,40 @@ class TerminalSession(
         }
     }
 
+    private fun createInitialBanner(): String {
+        val width = (cols - 2).coerceIn(32, 54)
+        val lineHoriz = "─".repeat(width - 2)
+        val title = "TerApp Terminal ${VersionManager.CURRENT_VERSION}"
+        val arch = "Arch: ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"} • Rust VT100 Core"
+        val userland = "Userland: BusyBox 1.36.1 POSIX"
+        val pkg = "Tools: pkg • Type 'help' or 'pkg'"
+
+        fun padCenter(text: String, len: Int): String {
+            val trimmed = if (text.length > len) text.substring(0, len) else text
+            val padTotal = len - trimmed.length
+            val padLeft = padTotal / 2
+            val padRight = padTotal - padLeft
+            return " ".repeat(padLeft) + trimmed + " ".repeat(padRight)
+        }
+
+        fun padLeft(text: String, len: Int): String {
+            val trimmed = if (text.length > len) text.substring(0, len) else text
+            return " " + trimmed + " ".repeat((len - trimmed.length - 1).coerceAtLeast(0))
+        }
+
+        val contentLen = width - 2
+        val sb = StringBuilder()
+        sb.append("\u001b[1;36m┌").append(lineHoriz).append("┐\u001b[0m\r\n")
+        sb.append("\u001b[1;32m│").append(padCenter(title, contentLen)).append("│\u001b[0m\r\n")
+        sb.append("\u001b[0;37m│").append(padLeft(arch, contentLen)).append("│\u001b[0m\r\n")
+        sb.append("\u001b[0;37m│").append(padLeft(userland, contentLen)).append("│\u001b[0m\r\n")
+        sb.append("\u001b[0;36m│").append(padLeft(pkg, contentLen)).append("│\u001b[0m\r\n")
+        sb.append("\u001b[1;36m└").append(lineHoriz).append("┘\u001b[0m\r\n")
+        sb.append("\u001b[0;90mChecking version status...\u001b[0m\r\n")
+        sb.append("~ $ ")
+        return sb.toString()
+    }
+
     private fun startShellProcess() {
         try {
             val filesDir = context?.filesDir ?: workingDir?.parentFile ?: File("/data/data/com.terapp/files")
@@ -74,6 +108,8 @@ class TerminalSession(
             pb.environment()["PREFIX"] = File(filesDir, "usr").absolutePath
             pb.environment()["SHELL"] = shellPath
             pb.environment()["PATH"] = "${usrBin.absolutePath}:/system/bin:/system/xbin"
+            pb.environment()["COLUMNS"] = cols.toString()
+            pb.environment()["LINES"] = rows.toString()
             pb.redirectErrorStream(true)
 
             val p = pb.start()
@@ -83,11 +119,19 @@ class TerminalSession(
             isRunning = true
 
             // Initial banner
-            val banner = "\u001b[1;36m========================================================\u001b[0m\r\n" +
-                         "\u001b[1;32m  TerApp (Rust Core) - Native Mobile Terminal v1.0\u001b[0m\r\n" +
-                         "\u001b[0;37m  POSIX Userland (BusyBox 1.36.1) | Type 'help' or 'pkg'\u001b[0m\r\n" +
-                         "\u001b[1;36m========================================================\u001b[0m\r\n~ $ "
-            feedBytes(banner.toByteArray())
+            feedBytes(createInitialBanner().toByteArray())
+
+            // Background version check
+            VersionManager.checkForUpdates { isLatest, latestVer, releaseUrl ->
+                if (!isRunning) return@checkForUpdates
+                val statusMsg = if (isLatest) {
+                    "\r\u001b[2K\u001b[1;32m✔ Version ${VersionManager.CURRENT_VERSION} is up-to-date\u001b[0m\r\n$currentPrompt"
+                } else {
+                    "\r\u001b[2K\u001b[1;33m⚡ Update available: $latestVer (Installed: ${VersionManager.CURRENT_VERSION})\u001b[0m\r\n\u001b[0;36m  Download: $releaseUrl\u001b[0m\r\n$currentPrompt"
+                }
+                feedBytes(statusMsg.toByteArray())
+                onScreenChanged?.invoke()
+            }
 
             // Background reader thread from process
             Thread {
@@ -182,6 +226,33 @@ class TerminalSession(
         }
     }
 
+    fun reflowLines(newCols: Int) {
+        if (newCols <= 0) return
+        synchronized(fallbackLines) {
+            val reflowed = ArrayList<StringBuilder>()
+            for (sb in fallbackLines) {
+                val str = sb.toString()
+                if (str.length <= newCols) {
+                    reflowed.add(StringBuilder(str))
+                } else {
+                    var offset = 0
+                    while (offset < str.length) {
+                        val end = (offset + newCols).coerceAtMost(str.length)
+                        reflowed.add(StringBuilder(str.substring(offset, end)))
+                        offset = end
+                    }
+                }
+            }
+            fallbackLines.clear()
+            fallbackLines.addAll(reflowed)
+            while (fallbackLines.size > maxScrollback + rows) {
+                fallbackLines.removeAt(0)
+            }
+            fallbackCursorY = (fallbackLines.size - 1).coerceAtLeast(0)
+            fallbackCursorX = fallbackLines.lastOrNull()?.length?.coerceIn(0, newCols - 1) ?: 0
+        }
+    }
+
     fun feedBytes(bytes: ByteArray) {
         val normalized = normalizeNewlines(bytes)
         feedFallback(normalized)
@@ -248,6 +319,19 @@ class TerminalSession(
                         }
                     }
                 } else if (c.code in 32..126 || c.code > 127) {
+                    // Check right edge auto-wrap
+                    if (fallbackCursorX >= cols) {
+                        fallbackCursorX = 0
+                        fallbackCursorY++
+                        if (fallbackCursorY >= fallbackLines.size) {
+                            fallbackLines.add(StringBuilder())
+                        }
+                        while (fallbackLines.size > maxScrollback + rows) {
+                            fallbackLines.removeAt(0)
+                            if (fallbackCursorY > 0) fallbackCursorY--
+                        }
+                    }
+
                     val line = getFallbackLine(fallbackCursorY)
                     while (line.length < fallbackCursorX) {
                         line.append(' ')
@@ -258,6 +342,7 @@ class TerminalSession(
                         line.append(c)
                     }
                     fallbackCursorX++
+
                     if (fallbackCursorX >= cols) {
                         fallbackCursorX = 0
                         fallbackCursorY++
@@ -296,7 +381,8 @@ class TerminalSession(
             val startRow = (total - rows).coerceAtLeast(0)
             val targetIndex = startRow + row - scrollOffset
             return if (targetIndex in 0 until total) {
-                fallbackLines[targetIndex].toString()
+                val raw = fallbackLines[targetIndex].toString()
+                if (raw.length > cols) raw.substring(0, cols) else raw
             } else {
                 ""
             }
@@ -309,7 +395,8 @@ class TerminalSession(
             val total = fallbackLines.size
             val start = (total - rows).coerceAtLeast(0)
             for (i in start until total) {
-                sb.append(fallbackLines[i].toString().trimEnd())
+                val raw = fallbackLines[i].toString().trimEnd()
+                sb.append(if (raw.length > cols) raw.substring(0, cols) else raw)
                 if (i < total - 1) sb.append("\n")
             }
         }
@@ -318,7 +405,7 @@ class TerminalSession(
 
     fun getCursorX(): Int {
         return if (nativePtr != 0L) {
-            TerAppBridge.getCursorXSafe(nativePtr)
+            TerAppBridge.getCursorXSafe(nativePtr).coerceIn(0, cols - 1)
         } else {
             fallbackCursorX.coerceIn(0, cols - 1)
         }
@@ -326,7 +413,7 @@ class TerminalSession(
 
     fun getCursorY(): Int {
         return if (nativePtr != 0L) {
-            TerAppBridge.getCursorYSafe(nativePtr)
+            TerAppBridge.getCursorYSafe(nativePtr).coerceIn(0, rows - 1)
         } else {
             val total = fallbackLines.size
             val startRow = (total - rows).coerceAtLeast(0)
@@ -358,14 +445,38 @@ class TerminalSession(
                                 return
                             }
                             "help" -> {
-                                val engine = if (nativePtr != 0L) "Rust Native Core (libterapp_android.so)" else "Fallback JVM Buffer"
-                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Package Manager: pkg (help, list, search, install, doctor, update)\r\n  Built-in: clear, help, mem\r\n$currentPrompt"
+                                val engine = if (nativePtr != 0L) "Rust VT100 Core" else "Fallback JVM Buffer"
+                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n" +
+                                              "  Version: ${VersionManager.CURRENT_VERSION}\r\n" +
+                                              "  POSIX: ls, grep, awk, sed, tar, vi, curl, wget, ps, top\r\n" +
+                                              "  Package Manager: pkg (help, list, search, doctor, update)\r\n" +
+                                              "  Built-in: clear, help, mem, version\r\n$currentPrompt"
                                 feedBytes(helpMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return
                             }
+                            "version" -> {
+                                val verMsg = "TerApp Mobile Terminal ${VersionManager.CURRENT_VERSION}\r\n" +
+                                             "  Architecture: ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"}\r\n" +
+                                             "  Engine: Rust VT100 Engine (Zero-Allocation Parser)\r\n" +
+                                             "  Userland: BusyBox 1.36.1 POSIX\r\n" +
+                                             "  Releases: ${VersionManager.REPO_URL}/releases\r\n" +
+                                             "Checking for updates...\r\n"
+                                feedBytes(verMsg.toByteArray())
+                                VersionManager.checkForUpdates { isLatest, latestVer, releaseUrl ->
+                                    val status = if (isLatest) {
+                                        "\u001b[1;32m✔ Version is up-to-date (${VersionManager.CURRENT_VERSION})\u001b[0m\r\n$currentPrompt"
+                                    } else {
+                                        "\u001b[1;33m⚡ Update available: $latestVer\u001b[0m\r\n\u001b[0;36m  $releaseUrl\u001b[0m\r\n$currentPrompt"
+                                    }
+                                    feedBytes(status.toByteArray())
+                                    onScreenChanged?.invoke()
+                                }
+                                onScreenChanged?.invoke()
+                                return
+                            }
                             "mem" -> {
-                                val engine = if (nativePtr != 0L) "Rust VT100/ANSI CSI Core (~324 KB)" else "Fallback JVM Buffer"
+                                val engine = if (nativePtr != 0L) "Rust VT100 Core (~324 KB)" else "Fallback JVM Buffer"
                                 val memMsg = "Memory Status:\r\n  Terminal Engine: $engine\r\n  Circular Ring Buffer: Active\r\n  POSIX Userland: BusyBox 1.36.1\r\n$currentPrompt"
                                 feedBytes(memMsg.toByteArray())
                                 onScreenChanged?.invoke()
@@ -419,8 +530,19 @@ class TerminalSession(
     }
 
     fun resize(newCols: Int, newRows: Int) {
+        val oldCols = cols
         cols = newCols.coerceAtLeast(10)
         rows = newRows.coerceAtLeast(5)
+
+        if (cols != oldCols) {
+            reflowLines(cols)
+        }
+
+        try {
+            processIn?.write("export COLUMNS=$cols LINES=$rows; stty cols $cols rows $rows 2>/dev/null\n".toByteArray())
+            processIn?.flush()
+        } catch (ignored: Exception) {}
+
         if (nativePtr != 0L) {
             TerAppBridge.resizeSafe(nativePtr, cols, rows)
         }

@@ -164,6 +164,10 @@ class MainActivity : AppCompatActivity() {
                 showThemeDialog()
                 true
             }
+            R.id.action_about -> {
+                showAboutDialog()
+                true
+            }
             R.id.action_wakelock -> {
                 isWakeLockEnabled = !isWakeLockEnabled
                 item.isChecked = isWakeLockEnabled
@@ -253,6 +257,51 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun showAboutDialog() {
+        val arch = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("TerApp ${VersionManager.CURRENT_VERSION}")
+            .setMessage(
+                "TerApp Mobile Terminal (Rust Core)\n\n" +
+                "• Version: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})\n" +
+                "• Architecture: $arch\n" +
+                "• Engine: Rust Native VT100 / ANSI CSI Parser\n" +
+                "• Userland: BusyBox 1.36.1 POSIX + pkg Manager\n" +
+                "• Repository: github.com/jeremy776/TerApp\n\n" +
+                "Checking for latest version..."
+            )
+            .setPositiveButton("OK", null)
+            .setNeutralButton("View Releases") { _, _ ->
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("${VersionManager.REPO_URL}/releases")
+                )
+                try { startActivity(intent) } catch (ignored: Exception) {}
+            }
+            .show()
+
+        VersionManager.checkForUpdates { isLatest, latestVer, _ ->
+            runOnUiThread {
+                if (dialog.isShowing) {
+                    val statusText = if (isLatest) {
+                        "✔ You are running the latest version (${VersionManager.CURRENT_VERSION})."
+                    } else {
+                        "⚡ Update Available: $latestVer\nInstalled: ${VersionManager.CURRENT_VERSION}\nTap 'View Releases' to download."
+                    }
+                    dialog.setMessage(
+                        "TerApp Mobile Terminal (Rust Core)\n\n" +
+                        "• Version: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})\n" +
+                        "• Architecture: $arch\n" +
+                        "• Engine: Rust Native VT100 / ANSI CSI Parser\n" +
+                        "• Userland: BusyBox 1.36.1 POSIX + pkg Manager\n" +
+                        "• Repository: github.com/jeremy776/TerApp\n\n" +
+                        statusText
+                    )
+                }
+            }
+        }
     }
 
     override fun onDestroy() {

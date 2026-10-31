@@ -12,4 +12,5 @@
     <string name="action_kill">Kill Session</string>
     <string name="menu_theme">Themes</string>
     <string name="menu_wakelock">Keep Awake</string>
+    <string name="menu_about">About &amp; Updates</string>
 </resources>

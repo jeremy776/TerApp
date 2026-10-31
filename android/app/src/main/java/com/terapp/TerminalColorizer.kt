@@ -28,7 +28,7 @@ data class ColorSpan(
 
 object TerminalColorizer {
     private val KNOWN_COMMANDS = hashSetOf(
-        "ls", "cd", "cat", "pwd", "echo", "clear", "help", "mem", "exit", "pkg",
+        "ls", "cd", "cat", "pwd", "echo", "clear", "help", "mem", "exit", "pkg", "version",
         "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
         "vi", "vim", "nano", "head", "tail", "wc", "sort", "uniq", "find",
         "xargs", "which", "whoami", "uname", "touch", "chmod", "chown",
@@ -94,13 +94,25 @@ object TerminalColorizer {
         refreshCache(workingDir)
         val rawSpans = ArrayList<ColorSpan>()
 
-        // 1. Check for Banner lines
-        if (line.startsWith("====")) {
-            rawSpans.add(ColorSpan(0, line.length, TerminalColors.BANNER_BORDER, isBold = true))
+        // 1. Check for Banner & Box-drawing lines
+        if (line.startsWith("====") || line.startsWith("┌") || line.startsWith("└") || line.startsWith("─") || line.startsWith("│")) {
+            if (line.contains("TerApp Terminal")) {
+                rawSpans.add(ColorSpan(0, line.length, TerminalColors.BANNER_TITLE, isBold = true))
+            } else {
+                rawSpans.add(ColorSpan(0, line.length, TerminalColors.BANNER_BORDER, isBold = true))
+            }
             return fillGaps(line.length, rawSpans, defaultColor)
         }
-        if (line.contains("TerApp (Rust Core)")) {
+        if (line.contains("TerApp Terminal") || line.contains("TerApp (Rust Core)")) {
             rawSpans.add(ColorSpan(0, line.length, TerminalColors.BANNER_TITLE, isBold = true))
+            return fillGaps(line.length, rawSpans, defaultColor)
+        }
+        if (line.contains("✔ Version") || line.contains("up-to-date")) {
+            rawSpans.add(ColorSpan(0, line.length, TerminalColors.COMMAND, isBold = true))
+            return fillGaps(line.length, rawSpans, defaultColor)
+        }
+        if (line.contains("⚡ Update available") || line.contains("Download at:")) {
+            rawSpans.add(ColorSpan(0, line.length, TerminalColors.OPTION, isBold = true))
             return fillGaps(line.length, rawSpans, defaultColor)
         }
 
