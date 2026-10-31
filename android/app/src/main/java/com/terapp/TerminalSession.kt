@@ -85,7 +85,7 @@ class TerminalSession(
             // Initial banner
             val banner = "\u001b[1;36m========================================================\u001b[0m\r\n" +
                          "\u001b[1;32m  TerApp (Rust Core) - Native Mobile Terminal v1.0\u001b[0m\r\n" +
-                         "\u001b[0;37m  POSIX Userland Active (BusyBox 1.36.1) | Type 'help'\u001b[0m\r\n" +
+                         "\u001b[0;37m  POSIX Userland (BusyBox 1.36.1) | Type 'help' or 'pkg'\u001b[0m\r\n" +
                          "\u001b[1;36m========================================================\u001b[0m\r\n~ $ "
             feedBytes(banner.toByteArray())
 
@@ -303,6 +303,19 @@ class TerminalSession(
         }
     }
 
+    fun getVisibleText(): String {
+        val sb = StringBuilder()
+        synchronized(fallbackLines) {
+            val total = fallbackLines.size
+            val start = (total - rows).coerceAtLeast(0)
+            for (i in start until total) {
+                sb.append(fallbackLines[i].toString().trimEnd())
+                if (i < total - 1) sb.append("\n")
+            }
+        }
+        return sb.toString().trim()
+    }
+
     fun getCursorX(): Int {
         return if (nativePtr != 0L) {
             TerAppBridge.getCursorXSafe(nativePtr)
@@ -346,7 +359,7 @@ class TerminalSession(
                             }
                             "help" -> {
                                 val engine = if (nativePtr != 0L) "Rust Native Core (libterapp_android.so)" else "Fallback JVM Buffer"
-                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Built-in: clear, help, mem\r\n$currentPrompt"
+                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n  POSIX Tools: ls, grep, awk, sed, tar, vi, find, curl, wget, ps, top, free\r\n  Package Manager: pkg (help, list, search, install, doctor, update)\r\n  Built-in: clear, help, mem\r\n$currentPrompt"
                                 feedBytes(helpMsg.toByteArray())
                                 onScreenChanged?.invoke()
                                 return

@@ -38,13 +38,19 @@ class TerminalView @JvmOverloads constructor(
             postInvalidate()
         }
 
+    private fun spToPx(sp: Float): Float {
+        return android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP,
+            sp,
+            resources.displayMetrics
+        )
+    }
+
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.MONOSPACE
-        textSize = 13f * resources.displayMetrics.scaledDensity
     }
     private val spanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.MONOSPACE
-        textSize = 13f * resources.displayMetrics.scaledDensity
     }
 
     private val bgPaint = Paint()
@@ -142,7 +148,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun updateFontMetrics() {
-        textPaint.textSize = fontSizeSp * resources.displayMetrics.scaledDensity
+        textPaint.textSize = spToPx(fontSizeSp)
         spanPaint.textSize = textPaint.textSize
         val fontMetrics = textPaint.fontMetrics
         charHeight = fontMetrics.bottom - fontMetrics.top

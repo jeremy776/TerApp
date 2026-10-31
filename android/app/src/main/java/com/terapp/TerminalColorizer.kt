@@ -28,7 +28,7 @@ data class ColorSpan(
 
 object TerminalColorizer {
     private val KNOWN_COMMANDS = hashSetOf(
-        "ls", "cd", "cat", "pwd", "echo", "clear", "help", "mem", "exit",
+        "ls", "cd", "cat", "pwd", "echo", "clear", "help", "mem", "exit", "pkg",
         "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
         "vi", "vim", "nano", "head", "tail", "wc", "sort", "uniq", "find",
         "xargs", "which", "whoami", "uname", "touch", "chmod", "chown",

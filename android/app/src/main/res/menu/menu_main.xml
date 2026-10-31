@@ -9,6 +9,21 @@
         app:showAsAction="ifRoom" />
 
     <item
+        android:id="@+id/action_copy"
+        android:title="@string/action_copy"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_paste"
+        android:title="@string/action_paste"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_split_view"
+        android:title="@string/action_split_view"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_wakelock"
         android:title="@string/menu_wakelock"
         android:checkable="true"
@@ -35,4 +50,3 @@
         app:showAsAction="never" />
 
 </menu>
-

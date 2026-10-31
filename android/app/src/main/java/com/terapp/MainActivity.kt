@@ -1,8 +1,12 @@
 package com.terapp
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -14,11 +18,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var topAppBar: MaterialToolbar
     private lateinit var sessionTabs: TabLayout
     private lateinit var terminalView: TerminalView
+    private lateinit var terminalViewSecondary: TerminalView
+    private lateinit var splitDivider: View
     private lateinit var extraKeysView: ExtraKeysView
 
     private val sessions = mutableListOf<TerminalSession>()
     private var activeSessionIndex = 0
     private var isWakeLockEnabled = false
+    private var isSplitViewEnabled = false
+    private lateinit var activeFocusedTerminal: TerminalView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,14 +45,26 @@ class MainActivity : AppCompatActivity() {
         topAppBar = findViewById(R.id.topAppBar)
         sessionTabs = findViewById(R.id.sessionTabs)
         terminalView = findViewById(R.id.terminalView)
+        terminalViewSecondary = findViewById(R.id.terminalViewSecondary)
+        splitDivider = findViewById(R.id.splitDivider)
         extraKeysView = findViewById(R.id.extraKeysView)
 
         setSupportActionBar(topAppBar)
 
+        activeFocusedTerminal = terminalView
+
         // Connect ExtraKeysView to TerminalView
         terminalView.extraKeysView = extraKeysView
+        terminalViewSecondary.extraKeysView = extraKeysView
         extraKeysView.onKeyAction = { actionKey ->
-            terminalView.sendSpecialKey(actionKey)
+            activeFocusedTerminal.sendSpecialKey(actionKey)
+        }
+
+        terminalView.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) activeFocusedTerminal = terminalView
+        }
+        terminalViewSecondary.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) activeFocusedTerminal = terminalViewSecondary
         }
 
         // Setup session tabs listener
@@ -94,6 +114,11 @@ class MainActivity : AppCompatActivity() {
             val current = sessions[index]
             terminalView.session = current
             topAppBar.subtitle = current.name
+
+            if (isSplitViewEnabled && sessions.size > 1) {
+                val secondaryIdx = if (index == 0) 1 else 0
+                terminalViewSecondary.session = sessions[secondaryIdx]
+            }
         }
     }
 
@@ -123,6 +148,18 @@ class MainActivity : AppCompatActivity() {
                 createNewSession("Session ${sessions.size + 1}")
                 true
             }
+            R.id.action_copy -> {
+                copyTerminalOutput()
+                true
+            }
+            R.id.action_paste -> {
+                pasteToTerminal()
+                true
+            }
+            R.id.action_split_view -> {
+                toggleSplitView(item)
+                true
+            }
             R.id.action_theme -> {
                 showThemeDialog()
                 true
@@ -136,15 +173,15 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             R.id.action_clear -> {
-                val s = terminalView.session
+                val s = activeFocusedTerminal.session
                 if (s != null) {
                     s.feedBytes("\u001b[2J\u001b[H".toByteArray())
-                    terminalView.invalidate()
+                    activeFocusedTerminal.invalidate()
                 }
                 true
             }
             R.id.action_reset -> {
-                terminalView.session?.writeBytes(byteArrayOf(0x03)) // Ctrl+C
+                activeFocusedTerminal.session?.writeBytes(byteArrayOf(0x03)) // Ctrl+C
                 true
             }
             R.id.action_kill -> {
@@ -152,6 +189,53 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun copyTerminalOutput() {
+        val clipMgr = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val text = activeFocusedTerminal.session?.getVisibleText().orEmpty()
+        if (text.isNotEmpty() && clipMgr != null) {
+            val clip = ClipData.newPlainText("TerApp Terminal", text)
+            clipMgr.setPrimaryClip(clip)
+            Toast.makeText(this, "Terminal output copied to clipboard", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun pasteToTerminal() {
+        val clipMgr = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = clipMgr?.primaryClip
+        if (clip != null && clip.itemCount > 0) {
+            val pasteText = clip.getItemAt(0).coerceToText(this).toString()
+            if (pasteText.isNotEmpty()) {
+                activeFocusedTerminal.session?.writeInput(pasteText)
+            }
+        } else {
+            Toast.makeText(this, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun toggleSplitView(item: MenuItem) {
+        isSplitViewEnabled = !isSplitViewEnabled
+        item.isChecked = isSplitViewEnabled
+
+        if (isSplitViewEnabled) {
+            if (sessions.size < 2) {
+                createNewSession("Session 2")
+            }
+            val secondaryIdx = if (activeSessionIndex == 0) 1 else 0
+            terminalViewSecondary.session = sessions[secondaryIdx]
+            terminalViewSecondary.visibility = View.VISIBLE
+            splitDivider.visibility = View.VISIBLE
+            Toast.makeText(this, "Split view enabled", Toast.LENGTH_SHORT).show()
+        } else {
+            terminalViewSecondary.visibility = View.GONE
+            splitDivider.visibility = View.GONE
+            activeFocusedTerminal = terminalView
+            terminalView.requestFocus()
+            Toast.makeText(this, "Split view disabled", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -164,6 +248,7 @@ class MainActivity : AppCompatActivity() {
             .setSingleChoiceItems(themeNames, currentIndex) { dialog, which ->
                 ThemeManager.currentTheme = ThemeManager.THEMES[which]
                 terminalView.invalidate()
+                terminalViewSecondary.invalidate()
                 dialog.dismiss()
             }
             .setNegativeButton(android.R.string.cancel, null)

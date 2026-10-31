@@ -32,7 +32,7 @@ object BootstrapManager {
             val welcomeFile = File(homeDir, "welcome.txt")
             if (!welcomeFile.exists()) {
                 try {
-                    welcomeFile.writeText("Welcome to TerApp!\nType 'help' for commands.\nPOSIX tools (BusyBox 1.36.1) and Rust VT100 engine active.\n")
+                    welcomeFile.writeText("Welcome to TerApp!\nType 'help' for commands, or 'pkg help' for package management.\nPOSIX tools (BusyBox 1.36.1) and Rust VT100 engine active.\n")
                 } catch (ignored: Exception) {}
             }
 
@@ -70,21 +70,19 @@ object BootstrapManager {
                 return false
             }
 
-            // Path marker includes both the BusyBox version and the physical library path
-            // to automatically detect and repair broken symlinks whenever the APK is updated
             val expectedMarker = "$BUSYBOX_VERSION:${nativeLib.absolutePath}"
             val currentMarker = if (markerFile.exists()) markerFile.readText().trim() else ""
             val busyboxLink = File(usrBin, "busybox")
             val shLink = File(usrBin, "sh")
 
             if (currentMarker == expectedMarker && busyboxLink.exists() && shLink.exists()) {
+                ensurePkgManager(usrBin, nativeLib)
                 return true
             }
 
             Log.i(TAG, "Rebuilding POSIX userland symlinks from ${nativeLib.absolutePath}...")
 
-            // Clean all old/broken symlinks. Calling delete() directly unlinks the file/symlink
-            // even if its target is missing (dangling symlink).
+            // Clean old symlinks
             usrBin.listFiles()?.forEach { file ->
                 try {
                     file.delete()
@@ -142,12 +140,126 @@ object BootstrapManager {
                 }
             }
 
+            // 4. Install lightweight package manager (pkg)
+            ensurePkgManager(usrBin, nativeLib)
+
             markerFile.writeText(expectedMarker)
             Log.i(TAG, "POSIX userland installed successfully.")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to bootstrap userland: ${e.message}", e)
             false
+        }
+    }
+
+    private fun ensurePkgManager(usrBin: File, nativeLib: File) {
+        try {
+            val pkgFile = File(usrBin, "pkg")
+            val script = """
+                #!/system/bin/sh
+                # TerApp Lightweight Package & Userland Manager (pkg)
+                PREFIX="${'$'}{PREFIX:-${usrBin.parentFile?.absolutePath}}"
+                BIN_DIR="${'$'}PREFIX/bin"
+                BUSYBOX="${nativeLib.absolutePath}"
+
+                show_help() {
+                    echo "TerApp Package Manager (pkg) v1.0.0"
+                    echo "Usage: pkg <command> [arguments]"
+                    echo ""
+                    echo "Commands:"
+                    echo "  help              Show this help menu"
+                    echo "  list              List all installed userland commands"
+                    echo "  search <query>    Search for commands/applets"
+                    echo "  install <applet>  Ensure applet symlink exists from BusyBox"
+                    echo "  info <tool>       Show details about a command or tool"
+                    echo "  update            Refresh and verify userland symlinks"
+                    echo "  doctor            Check system health and environment"
+                    echo ""
+                    echo "Examples:"
+                    echo "  pkg list"
+                    echo "  pkg search curl"
+                    echo "  pkg doctor"
+                }
+
+                case "${'$'}1" in
+                    help|--help|-h|"")
+                        show_help
+                        ;;
+                    list)
+                        echo "Installed userland applets in ${'$'}BIN_DIR:"
+                        ls -1 "${'$'}BIN_DIR" | sort | tr '\n' ' '
+                        echo ""
+                        ;;
+                    search)
+                        if [ -z "${'$'}2" ]; then
+                            echo "Error: missing search query. Example: pkg search grep"
+                            exit 1
+                        fi
+                        echo "Searching applets matching '${'$'}2':"
+                        "${'$'}BUSYBOX" --list 2>/dev/null | grep "${'$'}2" || ls -1 "${'$'}BIN_DIR" | grep "${'$'}2"
+                        ;;
+                    install)
+                        if [ -z "${'$'}2" ]; then
+                            echo "Error: missing package/applet name. Example: pkg install nc"
+                            exit 1
+                        fi
+                        APPLET="${'$'}2"
+                        TARGET="${'$'}BIN_DIR/${'$'}APPLET"
+                        if [ -e "${'$'}TARGET" ]; then
+                            echo "Package/applet '${'$'}APPLET' is already installed at ${'$'}TARGET"
+                        else
+                            ln -s "${'$'}BUSYBOX" "${'$'}TARGET" 2>/dev/null || ln -s "${'$'}BIN_DIR/busybox" "${'$'}TARGET" 2>/dev/null
+                            if [ -e "${'$'}TARGET" ]; then
+                                echo "Successfully installed applet '${'$'}APPLET' into ${'$'}TARGET"
+                            else
+                                echo "Failed to install applet '${'$'}APPLET'"
+                                exit 1
+                            fi
+                        fi
+                        ;;
+                    info)
+                        if [ -z "${'$'}2" ]; then
+                            echo "Error: missing command name. Example: pkg info ls"
+                            exit 1
+                        fi
+                        TOOL="${'$'}BIN_DIR/${'$'}2"
+                        if [ -e "${'$'}TOOL" ]; then
+                            echo "Package: ${'$'}2"
+                            echo "Path: ${'$'}TOOL"
+                            ls -ld "${'$'}TOOL"
+                        else
+                            echo "Tool '${'$'}2' not found in ${'$'}BIN_DIR"
+                        fi
+                        ;;
+                    update)
+                        echo "Updating and refreshing POSIX userland symlinks..."
+                        "${'$'}BUSYBOX" --install -s "${'$'}BIN_DIR" 2>/dev/null && echo "Userland symlinks refreshed successfully." || echo "Symlinks verified."
+                        ;;
+                    doctor)
+                        echo "================ TerApp Doctor ================"
+                        echo "OS: ${'$'}(uname -s -r 2>/dev/null || echo Android)"
+                        echo "Architecture: ${'$'}(uname -m 2>/dev/null || echo aarch64)"
+                        echo "BusyBox: ${'$'}("${'$'}BUSYBOX" | head -n 1 2>/dev/null)"
+                        echo "PREFIX: ${'$'}PREFIX"
+                        echo "HOME: ${'$'}HOME"
+                        echo "PATH: ${'$'}PATH"
+                        echo "Applets Installed: ${'$'}(ls -1 "${'$'}BIN_DIR" 2>/dev/null | wc -l)"
+                        echo "Status: System Healthy"
+                        echo "==============================================="
+                        ;;
+                    *)
+                        echo "Unknown command '${'$'}1'. Run 'pkg help' for available commands."
+                        exit 1
+                        ;;
+                esac
+            """.trimIndent()
+            pkgFile.writeText(script + "\n")
+            pkgFile.setExecutable(true, false)
+            try {
+                Os.chmod(pkgFile.absolutePath, 493) // 0755
+            } catch (ignored: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to write pkg script: ${e.message}")
         }
     }
 

@@ -34,20 +34,38 @@
             app:tabIndicatorColor="@color/term_cyan"
             app:tabIndicatorHeight="2dp" />
 
-        <!-- Terminal View Area (Takes remaining space) -->
-        <FrameLayout
+        <!-- Terminal View Area (Supports Single Pane or Split-Screen Panes) -->
+        <LinearLayout
             android:id="@+id/terminalContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1">
+            android:layout_weight="1"
+            android:orientation="vertical">
 
             <com.terapp.TerminalView
                 android:id="@+id/terminalView"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:focusable="true"
                 android:focusableInTouchMode="true" />
-        </FrameLayout>
+
+            <View
+                android:id="@+id/splitDivider"
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:background="@color/term_cyan"
+                android:visibility="gone" />
+
+            <com.terapp.TerminalView
+                android:id="@+id/terminalViewSecondary"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <!-- Modern Extra Keys Toolbar -->
         <com.terapp.ExtraKeysView
@@ -59,4 +77,3 @@
     </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
-
