@@ -114,9 +114,10 @@ pub unsafe extern "system" fn Java_com_terapp_TerAppBridge_getLineText(
     if ptr != 0 && row >= 0 {
         let session = &*(ptr as *const TerminalSession);
         if let Ok(emu) = session.emulator.lock() {
-            if let Some(r) = emu.buffer.screen.get(row as usize) {
+            if let Some(r) = emu.buffer.get_view_row(row as usize, 0) {
                 let line_str: String = r.cells.iter().map(|c| c.ch).collect();
-                if let Ok(jstr) = env.new_string(line_str) {
+                let trimmed = line_str.trim_end();
+                if let Ok(jstr) = env.new_string(trimmed) {
                     return jstr.into_raw();
                 }
             }

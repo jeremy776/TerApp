@@ -1,16 +1,70 @@
-/target
+# =============================================================================
+# TerApp - Git Ignore Configuration
+# =============================================================================
+
+# --- Rust & Cargo ---
+/target/
+crates/**/target/
 **/*.rs.bk
-Cargo.lock
+# Machine-specific toolchain paths (NDK path, local linker configs)
+.cargo/
 
-# Android build outputs
+# --- Android & Gradle ---
+.gradle/
+*/.gradle/
+**/build/
+.kotlin/
+*/.kotlin/
+**/buildOutputCleanup/
+
+# Android SDK Local Configuration (machine-specific SDK paths)
+local.properties
+*/local.properties
+
+# Android C/C++ NDK build artifacts
+.cxx/
+*/.cxx/
+.externalNativeBuild/
+
+# Package & Binary outputs
 *.apk
+*.ap_
 *.aab
-*.so
+*.dex
+*.class
 
-# IDE
+# Native shared libraries (.so)
+# Ignore general .so build artifacts, but preserve bundled native libraries required by the app
+*.so
+!android/app/src/main/jniLibs/**/libbusybox.so
+!android/app/src/main/jniLibs/**/libterapp_android.so
+
+# Signing keys & secrets (never commit release keys!)
+*.keystore
+*.jks
+*.key
+*.p12
+google-services.json
+
+# --- JVM, Crash & Log files ---
+*.log
+hs_err_pid*.log
+replay_pid*.log
+
+# --- IDE & Editors ---
 .idea/
-.vscode/
 *.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*~
+.project
+.classpath
+.settings/
+
+# --- OS Generated Files ---
 .DS_Store
 Thumbs.db
-
+ehthumbs.db
+Desktop.ini
