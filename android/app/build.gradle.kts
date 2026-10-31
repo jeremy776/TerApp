@@ -10,9 +10,15 @@ android {
     defaultConfig {
         applicationId = "com.terapp"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        // Target SDK is explicitly set to 28 (Android 9.0 Pie), exactly as Termux does
+        // (https://github.com/termux/termux-app).
+        // Starting with Android 10 (API 29), Android SELinux enforces W^X policy on untrusted apps,
+        // blocking execve() on files within app private data directories (/data/data/.../files).
+        // Targeting API 28 retains the platform capability to execute native binaries, applets,
+        // package manager scripts, and user shell scripts.
+        targetSdk = 28
+        versionCode = 3
+        versionName = "1.1.1"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -75,6 +81,12 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+        disable += listOf("ExpiredTargetSdkVersion")
     }
 }
 

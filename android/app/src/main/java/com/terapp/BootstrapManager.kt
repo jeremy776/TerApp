@@ -4,17 +4,73 @@ import android.content.Context
 import android.system.Os
 import android.util.Log
 import java.io.File
+import java.util.zip.ZipFile
 
 object BootstrapManager {
     private const val TAG = "BootstrapManager"
     private const val BUSYBOX_VERSION = "1.36.1"
 
+    /**
+     * Resolves an executable BusyBox binary:
+     * 1. Check extracted nativeLibraryDir (libbusybox.so)
+     * 2. Check usr/bin/busybox inside app filesDir
+     * 3. Extract libbusybox.so directly from the APK archive
+     */
     fun getBusyboxBinary(context: Context): File? {
+        // 1. Check native library directory
         val nativeLib = File(context.applicationInfo.nativeLibraryDir, "libbusybox.so")
         if (nativeLib.exists() && nativeLib.canExecute()) {
             return nativeLib
         }
-        return null
+
+        // 2. Check usr/bin/busybox in private files directory
+        val usrBinBusybox = File(context.filesDir, "usr/bin/busybox")
+        if (usrBinBusybox.exists() && usrBinBusybox.canExecute()) {
+            return usrBinBusybox
+        }
+
+        // 3. Fallback: extract directly from the APK package
+        val extracted = extractBusyboxFromApk(context, usrBinBusybox)
+        if (extracted && usrBinBusybox.exists()) {
+            return usrBinBusybox
+        }
+
+        return if (nativeLib.exists()) nativeLib else null
+    }
+
+    private fun extractBusyboxFromApk(context: Context, destFile: File): Boolean {
+        return try {
+            val apkPath = context.applicationInfo.sourceDir
+            val apkFile = File(apkPath)
+            if (!apkFile.exists()) return false
+
+            destFile.parentFile?.mkdirs()
+
+            ZipFile(apkFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    if (entry.name.endsWith("libbusybox.so")) {
+                        zip.getInputStream(entry).use { input ->
+                            destFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        try {
+                            Os.chmod(destFile.absolutePath, 493) // 0755
+                        } catch (e: Exception) {
+                            destFile.setExecutable(true, false)
+                        }
+                        Log.i(TAG, "Extracted libbusybox.so directly from APK to ${destFile.absolutePath}")
+                        return true
+                    }
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract libbusybox.so from APK: ${e.message}")
+            false
+        }
     }
 
     fun ensureBootstrap(context: Context): Boolean {
@@ -22,17 +78,61 @@ object BootstrapManager {
             val filesDir = context.filesDir
             val usrDir = File(filesDir, "usr")
             val usrBin = File(usrDir, "bin")
+            val usrTmp = File(usrDir, "tmp")
+            val usrEtc = File(usrDir, "etc")
             val homeDir = File(filesDir, "home")
             val markerFile = File(usrDir, ".marker")
 
             usrBin.mkdirs()
+            usrTmp.mkdirs()
+            usrEtc.mkdirs()
             homeDir.mkdirs()
+
+            try {
+                Os.chmod(usrBin.absolutePath, 493) // 0755
+                Os.chmod(usrTmp.absolutePath, 511) // 0777
+                Os.chmod(homeDir.absolutePath, 448) // 0700
+            } catch (ignored: Exception) {}
+
+            // 1. Locate or extract BusyBox binary
+            val busyboxBin = File(usrBin, "busybox")
+            val nativeLib = File(context.applicationInfo.nativeLibraryDir, "libbusybox.so")
+
+            if (!busyboxBin.exists() || !busyboxBin.canExecute()) {
+                if (nativeLib.exists()) {
+                    try {
+                        nativeLib.inputStream().use { input ->
+                            busyboxBin.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Copy from nativeLibraryDir failed: ${e.message}")
+                    }
+                }
+                if (!busyboxBin.exists() || busyboxBin.length() == 0L) {
+                    extractBusyboxFromApk(context, busyboxBin)
+                }
+            }
+
+            try {
+                Os.chmod(busyboxBin.absolutePath, 493) // 0755
+                busyboxBin.setExecutable(true, false)
+            } catch (ignored: Exception) {}
+
+            val expectedMarker = "$BUSYBOX_VERSION:${busyboxBin.length()}"
+            val currentMarker = if (markerFile.exists()) markerFile.readText().trim() else ""
+            val shBin = File(usrBin, "sh")
 
             // Create initial welcome file in home if it doesn't exist
             val welcomeFile = File(homeDir, "welcome.txt")
             if (!welcomeFile.exists()) {
                 try {
-                    welcomeFile.writeText("Welcome to TerApp!\nType 'help' for commands, or 'pkg help' for package management.\nPOSIX tools (BusyBox 1.36.1) and Rust VT100 engine active.\n")
+                    welcomeFile.writeText(
+                        "Welcome to TerApp!\n" +
+                        "Type 'help' for terminal commands, or 'pkg help' for package management.\n" +
+                        "POSIX tools (BusyBox 1.36.1) and Rust VT100 engine active.\n"
+                    )
                 } catch (ignored: Exception) {}
             }
 
@@ -45,70 +145,83 @@ object BootstrapManager {
             val helloScript = File(homeDir, "hello.sh")
             if (!helloScript.exists()) {
                 try {
-                    helloScript.writeText("#!/system/bin/sh\necho \"TerApp Script Execution: Success!\"\necho \"Current directory: \$(pwd)\"\necho \"Host architecture: \$(uname -m)\"\n")
+                    helloScript.writeText(
+                        "#!/system/bin/sh\n" +
+                        "echo \"TerApp Script Execution: Success!\"\n" +
+                        "echo \"Current directory: \$(pwd)\"\n" +
+                        "echo \"Host architecture: \$(uname -m)\"\n"
+                    )
                     helloScript.setExecutable(true, false)
-                    try {
-                        Os.chmod(helloScript.absolutePath, 493) // 0755
-                    } catch (ignored: Exception) {}
+                    try { Os.chmod(helloScript.absolutePath, 493) } catch (ignored: Exception) {}
                 } catch (ignored: Exception) {}
             }
 
             val demoScript = File(scriptsDir, "demo.sh")
             if (!demoScript.exists()) {
                 try {
-                    demoScript.writeText("#!/system/bin/sh\necho \"Running demo script inside scripts/ folder!\"\n")
+                    demoScript.writeText(
+                        "#!/system/bin/sh\n" +
+                        "echo \"Running demo script inside scripts/ folder!\"\n" +
+                        "echo \"Listing files:\"\n" +
+                        "ls -la\n"
+                    )
                     demoScript.setExecutable(true, false)
-                    try {
-                        Os.chmod(demoScript.absolutePath, 493) // 0755
-                    } catch (ignored: Exception) {}
+                    try { Os.chmod(demoScript.absolutePath, 493) } catch (ignored: Exception) {}
                 } catch (ignored: Exception) {}
             }
 
-            val nativeLib = getBusyboxBinary(context)
-            if (nativeLib == null) {
-                Log.w(TAG, "libbusybox.so not found in nativeLibraryDir")
-                return false
+            // Setup environment profile
+            val profileFile = File(usrEtc, "profile")
+            if (!profileFile.exists()) {
+                try {
+                    profileFile.writeText(
+                        "export PREFIX=\"${usrDir.absolutePath}\"\n" +
+                        "export HOME=\"${homeDir.absolutePath}\"\n" +
+                        "export TMPDIR=\"${usrTmp.absolutePath}\"\n" +
+                        "export PATH=\"${usrBin.absolutePath}:/system/bin:/system/xbin\"\n" +
+                        "export TERM=\"xterm-256color\"\n" +
+                        "alias pkg=\"${usrBin.absolutePath}/pkg\"\n"
+                    )
+                } catch (ignored: Exception) {}
             }
 
-            val expectedMarker = "$BUSYBOX_VERSION:${nativeLib.absolutePath}"
-            val currentMarker = if (markerFile.exists()) markerFile.readText().trim() else ""
-            val busyboxLink = File(usrBin, "busybox")
-            val shLink = File(usrBin, "sh")
+            val userProfile = File(homeDir, ".profile")
+            if (!userProfile.exists()) {
+                try {
+                    userProfile.writeText(
+                        "export PATH=\"${usrBin.absolutePath}:/system/bin:/system/xbin\"\n" +
+                        "export TMPDIR=\"${usrTmp.absolutePath}\"\n" +
+                        "alias pkg=\"${usrBin.absolutePath}/pkg\"\n"
+                    )
+                } catch (ignored: Exception) {}
+            }
 
-            if (currentMarker == expectedMarker && busyboxLink.exists() && shLink.exists()) {
-                ensurePkgManager(usrBin, nativeLib)
+            if (currentMarker == expectedMarker && busyboxBin.exists() && shBin.exists()) {
+                ensurePkgManager(usrBin, busyboxBin)
                 return true
             }
 
-            Log.i(TAG, "Rebuilding POSIX userland symlinks from ${nativeLib.absolutePath}...")
+            Log.i(TAG, "Rebuilding POSIX userland symlinks with BusyBox at ${busyboxBin.absolutePath}...")
 
-            // Clean old symlinks
-            usrBin.listFiles()?.forEach { file ->
+            // 2. Setup sh executable (symlink to busybox or copy)
+            try {
+                shBin.delete()
+                Os.symlink("busybox", shBin.absolutePath)
+            } catch (e: Exception) {
                 try {
-                    file.delete()
+                    busyboxBin.copyTo(shBin, overwrite = true)
                 } catch (ignored: Exception) {}
             }
-
-            // 1. Create main busybox symlink
             try {
-                busyboxLink.delete()
-                Os.symlink(nativeLib.absolutePath, busyboxLink.absolutePath)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to symlink busybox: ${e.message}")
-            }
-
-            // 2. Create sh symlink
-            try {
-                shLink.delete()
-                Os.symlink(nativeLib.absolutePath, shLink.absolutePath)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to symlink sh: ${e.message}")
-            }
+                Os.chmod(shBin.absolutePath, 493) // 0755
+                shBin.setExecutable(true, false)
+            } catch (ignored: Exception) {}
 
             // 3. Install all BusyBox applets into usr/bin
             var installSuccess = false
             try {
-                val pb = ProcessBuilder(busyboxLink.absolutePath, "--install", "-s", usrBin.absolutePath)
+                val pb = ProcessBuilder(busyboxBin.absolutePath, "--install", "-s", usrBin.absolutePath)
+                pb.directory(usrBin)
                 val proc = pb.start()
                 val exitCode = proc.waitFor()
                 if (exitCode == 0) {
@@ -119,29 +232,33 @@ object BootstrapManager {
                 Log.w(TAG, "busybox --install -s failed: ${e.message}")
             }
 
-            // Fallback manual symlinks if --install failed
-            if (!installSuccess) {
-                val applets = listOf(
-                    "ash", "bash", "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir",
-                    "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
-                    "vi", "head", "tail", "wc", "sort", "uniq", "find", "xargs",
-                    "which", "whoami", "uname", "pwd", "date", "touch", "chmod", "df", "du",
-                    "ps", "kill", "top", "free", "uptime", "curl", "wget", "env", "clear",
-                    "bzip2", "xz", "unzip", "base64", "md5sum", "sha256sum", "ping", "netstat",
-                    "tree", "nano", "diff", "patch", "more", "less", "stat", "strings"
-                )
+            // Fallback manual symlinks if --install failed or skipped
+            val applets = listOf(
+                "ash", "bash", "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir",
+                "grep", "egrep", "fgrep", "awk", "sed", "tar", "gzip", "gunzip",
+                "vi", "nano", "head", "tail", "wc", "sort", "uniq", "find", "xargs",
+                "which", "whoami", "uname", "pwd", "date", "touch", "chmod", "chown",
+                "df", "du", "ps", "kill", "top", "free", "uptime", "curl", "wget", "env", "clear",
+                "bzip2", "xz", "unzip", "base64", "md5sum", "sha256sum", "ping", "netstat",
+                "tree", "diff", "patch", "more", "less", "stat", "strings", "sleep", "sync",
+                "mktemp", "test", "true", "false", "echo", "printf", "tr", "cut", "tee"
+            )
 
-                for (applet in applets) {
-                    val targetFile = File(usrBin, applet)
+            for (applet in applets) {
+                val targetFile = File(usrBin, applet)
+                if (!targetFile.exists()) {
                     try {
-                        targetFile.delete()
-                        Os.symlink(nativeLib.absolutePath, targetFile.absolutePath)
-                    } catch (ignored: Exception) {}
+                        Os.symlink("busybox", targetFile.absolutePath)
+                    } catch (e: Exception) {
+                        try {
+                            Os.symlink(busyboxBin.absolutePath, targetFile.absolutePath)
+                        } catch (ignored: Exception) {}
+                    }
                 }
             }
 
             // 4. Install lightweight package manager (pkg)
-            ensurePkgManager(usrBin, nativeLib)
+            ensurePkgManager(usrBin, busyboxBin)
 
             markerFile.writeText(expectedMarker)
             Log.i(TAG, "POSIX userland installed successfully.")
@@ -152,7 +269,7 @@ object BootstrapManager {
         }
     }
 
-    private fun ensurePkgManager(usrBin: File, nativeLib: File) {
+    private fun ensurePkgManager(usrBin: File, busyboxBin: File) {
         try {
             val pkgFile = File(usrBin, "pkg")
             val script = """
@@ -160,7 +277,10 @@ object BootstrapManager {
                 # TerApp Lightweight Package & Userland Manager (pkg)
                 PREFIX="${'$'}{PREFIX:-${usrBin.parentFile?.absolutePath}}"
                 BIN_DIR="${'$'}PREFIX/bin"
-                BUSYBOX="${nativeLib.absolutePath}"
+                BUSYBOX="${'$'}BIN_DIR/busybox"
+                if [ ! -x "${'$'}BUSYBOX" ]; then
+                    BUSYBOX="${busyboxBin.absolutePath}"
+                fi
 
                 show_help() {
                     echo "TerApp Package Manager (pkg) ${VersionManager.CURRENT_VERSION}"
@@ -182,44 +302,45 @@ object BootstrapManager {
                 }
 
                 case "${'$'}1" in
-                    help|--help|-h|"")
+                    ""|help)
                         show_help
                         ;;
                     list)
-                        echo "Installed userland applets in ${'$'}BIN_DIR:"
-                        ls -1 "${'$'}BIN_DIR" | sort | tr '\n' ' '
-                        echo ""
+                        echo "Installed commands in ${'$'}BIN_DIR:"
+                        ls -1 "${'$'}BIN_DIR" | sort | column -c 60 2>/dev/null || ls -1 "${'$'}BIN_DIR"
                         ;;
                     search)
                         if [ -z "${'$'}2" ]; then
-                            echo "Error: missing search query. Example: pkg search grep"
+                            echo "Error: Please specify search query."
+                            echo "Usage: pkg search <query>"
                             exit 1
                         fi
-                        echo "Searching applets matching '${'$'}2':"
-                        "${'$'}BUSYBOX" --list 2>/dev/null | grep "${'$'}2" || ls -1 "${'$'}BIN_DIR" | grep "${'$'}2"
+                        echo "Searching for '${'$'}2' in installed tools:"
+                        ls -1 "${'$'}BIN_DIR" | grep -i "${'$'}2" || echo "No matching tools found."
                         ;;
                     install)
                         if [ -z "${'$'}2" ]; then
-                            echo "Error: missing package/applet name. Example: pkg install nc"
+                            echo "Error: Please specify applet name."
+                            echo "Usage: pkg install <applet>"
                             exit 1
                         fi
-                        APPLET="${'$'}2"
-                        TARGET="${'$'}BIN_DIR/${'$'}APPLET"
+                        TARGET="${'$'}BIN_DIR/${'$'}2"
                         if [ -e "${'$'}TARGET" ]; then
-                            echo "Package/applet '${'$'}APPLET' is already installed at ${'$'}TARGET"
+                            echo "Applet '${'$'}2' is already installed at ${'$'}TARGET"
                         else
-                            ln -s "${'$'}BUSYBOX" "${'$'}TARGET" 2>/dev/null || ln -s "${'$'}BIN_DIR/busybox" "${'$'}TARGET" 2>/dev/null
+                            ln -s "${'$'}BUSYBOX" "${'$'}TARGET" 2>/dev/null || ln -s busybox "${'$'}TARGET"
                             if [ -e "${'$'}TARGET" ]; then
-                                echo "Successfully installed applet '${'$'}APPLET' into ${'$'}TARGET"
+                                echo "Successfully installed '${'$'}2' -> ${'$'}TARGET"
                             else
-                                echo "Failed to install applet '${'$'}APPLET'"
+                                echo "Failed to install '${'$'}2'."
                                 exit 1
                             fi
                         fi
                         ;;
                     info)
                         if [ -z "${'$'}2" ]; then
-                            echo "Error: missing command name. Example: pkg info ls"
+                            echo "Error: Please specify tool name."
+                            echo "Usage: pkg info <tool>"
                             exit 1
                         fi
                         TOOL="${'$'}BIN_DIR/${'$'}2"
@@ -240,7 +361,7 @@ object BootstrapManager {
                         echo "TerApp: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})"
                         echo "OS: ${'$'}(uname -s -r 2>/dev/null || echo Android)"
                         echo "Architecture: ${'$'}(uname -m 2>/dev/null || echo aarch64)"
-                        echo "BusyBox: ${'$'}("${'$'}BUSYBOX" | head -n 1 2>/dev/null)"
+                        echo "BusyBox: ${'$'}("${'$'}BUSYBOX" | head -n 1 2>/dev/null || echo BusyBox)"
                         echo "PREFIX: ${'$'}PREFIX"
                         echo "HOME: ${'$'}HOME"
                         echo "PATH: ${'$'}PATH"

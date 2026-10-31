@@ -86,30 +86,46 @@ class TerminalSession(
     private fun startShellProcess() {
         try {
             val filesDir = context?.filesDir ?: workingDir?.parentFile ?: File("/data/data/com.terapp/files")
-            val usrBin = File(filesDir, "usr/bin")
+            val usrDir = File(filesDir, "usr")
+            val usrBin = File(usrDir, "bin")
+            val usrTmp = File(usrDir, "tmp")
+            if (!usrTmp.exists()) usrTmp.mkdirs()
+
             val home = workingDir ?: File(filesDir, "home")
             if (!home.exists()) home.mkdirs()
             workingDir = home
             canonicalHome = try { home.canonicalPath } catch (e: Exception) { home.absolutePath }
 
             val shFile = File(usrBin, "sh")
-            val shellPath = if (shFile.exists() && shFile.canExecute()) {
-                shFile.absolutePath
-            } else if (File("/system/bin/sh").exists()) {
-                "/system/bin/sh"
+            val busyboxFile = File(usrBin, "busybox")
+
+            val shellCommand: List<String> = if (shFile.exists() && shFile.canExecute()) {
+                listOf(shFile.absolutePath)
+            } else if (busyboxFile.exists() && busyboxFile.canExecute()) {
+                listOf(busyboxFile.absolutePath, "sh")
             } else {
-                "sh"
+                val nativeLib = context?.let { BootstrapManager.getBusyboxBinary(it) }
+                if (nativeLib != null && nativeLib.canExecute()) {
+                    listOf(nativeLib.absolutePath, "sh")
+                } else if (File("/system/bin/sh").exists()) {
+                    listOf("/system/bin/sh")
+                } else {
+                    listOf("sh")
+                }
             }
 
-            val pb = ProcessBuilder(shellPath)
+            val pb = ProcessBuilder(shellCommand)
             pb.directory(home)
-            pb.environment()["TERM"] = "xterm-256color"
-            pb.environment()["HOME"] = home.absolutePath
-            pb.environment()["PREFIX"] = File(filesDir, "usr").absolutePath
-            pb.environment()["SHELL"] = shellPath
-            pb.environment()["PATH"] = "${usrBin.absolutePath}:/system/bin:/system/xbin"
-            pb.environment()["COLUMNS"] = cols.toString()
-            pb.environment()["LINES"] = rows.toString()
+            val env = pb.environment()
+            env["TERM"] = "xterm-256color"
+            env["HOME"] = home.absolutePath
+            env["PREFIX"] = usrDir.absolutePath
+            env["TMPDIR"] = usrTmp.absolutePath
+            env["SHELL"] = shellCommand[0]
+            env["PATH"] = "${usrBin.absolutePath}:/system/bin:/system/xbin"
+            env["BUSYBOX"] = if (busyboxFile.exists()) busyboxFile.absolutePath else "busybox"
+            env["COLUMNS"] = cols.toString()
+            env["LINES"] = rows.toString()
             pb.redirectErrorStream(true)
 
             val p = pb.start()

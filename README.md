@@ -217,8 +217,8 @@ TerApp comes with automated CI/CD pipelines out of the box:
 ### 2. Automated Release Pipeline (`.github/workflows/release.yml`)
 * **Trigger via Git Tag:**
   ```bash
-  git tag v1.1.0
-  git push origin v1.1.0
+  git tag v1.1.1
+  git push origin v1.1.1
   ```
 * **Trigger Manually:** Run the **Release APK** workflow in GitHub Actions with custom tag parameters.
 * **Automatic Outputs:**
@@ -269,6 +269,12 @@ TerApp comes with automated CI/CD pipelines out of the box:
   - [x] Ergonomic ExtraKeys toolbar with tactile pill keys and modifier toggle indicators
   - [x] Refined multi-session tab navigation and native split pane divider handle
   - [x] Dynamic text wrapping and responsive terminal column calculation
+
+- [x] **Milestone 8: Android Permission & SELinux Execution Fix (v1.1.1)**
+  - [x] Set `targetSdkVersion = 28` matching Termux architecture to prevent Android 10+ SELinux W^X `Permission denied` on app data files
+  - [x] Enabled `android:extractNativeLibs="true"` and legacy storage in `AndroidManifest.xml`
+  - [x] Implemented resilient bootstrap engine with direct APK extraction fallback
+  - [x] Standardized executable permissions (`0755`) for BusyBox, applets, and package manager (`pkg`)
 
 ---
 
