@@ -66,5 +66,66 @@ mod tests {
         let r0_scrolled = term.buffer.get_view_row(0, 1).unwrap();
         assert_eq!(r0_scrolled.cells[4].ch, '1');
     }
+
+    #[test]
+    fn test_alternate_screen_buffer() {
+        let mut term = TerminalEmulator::new(10, 2, 5);
+        term.process_bytes(b"main screen");
+        assert_eq!(term.buffer.get_cell(0, 0).unwrap().ch, 'm');
+
+        // Switch to alternate screen buffer: \x1b[?1049h
+        term.process_bytes(b"\x1b[?1049h");
+        assert!(term.buffer.is_alt_screen);
+        assert_eq!(term.buffer.get_cell(0, 0).unwrap().ch, ' ');
+
+        term.process_bytes(b"alt screen");
+        assert_eq!(term.buffer.get_cell(0, 0).unwrap().ch, 'a');
+
+        // Switch back to main screen: \x1b[?1049l
+        term.process_bytes(b"\x1b[?1049l");
+        assert!(!term.buffer.is_alt_screen);
+        assert_eq!(term.buffer.get_cell(0, 0).unwrap().ch, 'm');
+    }
+
+    #[test]
+    fn test_extended_colors() {
+        let mut term = TerminalEmulator::new(20, 2, 5);
+        // 256 colors foreground: \x1b[38;5;196m
+        term.process_bytes(b"\x1b[38;5;196mA");
+        let c = term.buffer.get_cell(0, 0).unwrap();
+        assert_eq!(c.ch, 'A');
+        assert_eq!(c.fg, Color::Ansi256(196));
+
+        // TrueColor RGB foreground: \x1b[38;2;12;34;56m
+        term.process_bytes(b"\x1b[38;2;12;34;56mB");
+        let c2 = term.buffer.get_cell(1, 0).unwrap();
+        assert_eq!(c2.ch, 'B');
+        assert_eq!(c2.fg, Color::Rgb(12, 34, 56));
+    }
+
+    #[test]
+    fn test_cursor_save_restore_and_title() {
+        let mut term = TerminalEmulator::new(20, 5, 5);
+        term.process_bytes(b"Hello");
+        assert_eq!(term.cursor.x, 5);
+
+        // Save cursor with \x1b7
+        term.process_bytes(b"\x1b7");
+        term.process_bytes(b"\r\nNew Line");
+        assert_eq!(term.cursor.y, 1);
+
+        // Restore cursor with \x1b8
+        term.process_bytes(b"\x1b8");
+        assert_eq!(term.cursor.x, 5);
+        assert_eq!(term.cursor.y, 0);
+
+        // OSC 0;MyTitle\x07
+        term.process_bytes(b"\x1b]0;My Terminal\x07");
+        assert_eq!(term.title, "My Terminal");
+
+        // Bell character \x07
+        term.process_bytes(b"\x07");
+        assert_eq!(term.bell_count, 1);
+    }
 }
 

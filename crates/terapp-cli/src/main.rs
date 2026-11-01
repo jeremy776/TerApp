@@ -33,6 +33,7 @@ fn to_crossterm_color(color: Color) -> CtColor {
             15 => CtColor::White,
             _ => CtColor::Reset,
         },
+        Color::Ansi256(c) => CtColor::AnsiValue(c),
         Color::Rgb(r, g, b) => CtColor::Rgb { r, g, b },
     }
 }

@@ -354,6 +354,7 @@ name = "terapp-android"
 version = "0.1.0"
 dependencies = [
  "jni",
+ "libc",
  "terapp-core",
  "terapp-pty",
 ]

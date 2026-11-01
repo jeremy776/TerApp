@@ -20,8 +20,8 @@ class ExtraKeysView @JvmOverloads constructor(
     private val container = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        val padH = (6 * density).toInt()
-        val padV = (4 * density).toInt()
+        val padH = (4 * density).toInt()
+        val padV = (2 * density).toInt()
         setPadding(padH, padV, padH, padV)
     }
 
@@ -44,19 +44,22 @@ class ExtraKeysView @JvmOverloads constructor(
 
     private fun setupKeys() {
         val keys = listOf(
-            "ESC", "TAB", "CTRL", "ALT", "|", "/", "-", "_", "~", ":", "↑", "↓", "←", "→"
+            "ESC", "TAB", "CTRL", "ALT",
+            "HOME", "END", "PGUP", "PGDN", "INS", "DEL",
+            "|", "/", "-", "_", "~", ":", "\"", "'",
+            "(", ")", "$", "&", ";", "↑", "↓", "←", "→"
         )
 
-        val btnHeight = (38 * density).toInt()
-        val padH = (12 * density).toInt()
-        val marginH = (3 * density).toInt()
-        val marginV = (4 * density).toInt()
-        val cornerRadiusPx = (8 * density).toInt()
+        val btnHeight = (36 * density).toInt()
+        val padH = (10 * density).toInt()
+        val marginH = (2 * density).toInt()
+        val marginV = (2 * density).toInt()
+        val cornerRadiusPx = (6 * density).toInt()
 
         for (key in keys) {
             val btn = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
                 text = key
-                textSize = 12f
+                textSize = 11f
                 typeface = Typeface.MONOSPACE
                 isAllCaps = false
                 insetTop = 0
@@ -103,15 +106,6 @@ class ExtraKeysView @JvmOverloads constructor(
             }
             else -> {
                 onKeyAction?.invoke(key)
-                // Auto-reset single modifiers after use unless explicitly preserved
-                if (isCtrlActive) {
-                    isCtrlActive = false
-                    ctrlButton?.isActivated = false
-                }
-                if (isAltActive) {
-                    isAltActive = false
-                    altButton?.isActivated = false
-                }
             }
         }
     }
@@ -128,5 +122,12 @@ class ExtraKeysView @JvmOverloads constructor(
             altButton?.isActivated = false
         }
         return Pair(ctrl, alt)
+    }
+
+    fun resetModifiers() {
+        isCtrlActive = false
+        isAltActive = false
+        ctrlButton?.isActivated = false
+        altButton?.isActivated = false
     }
 }

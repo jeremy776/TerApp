@@ -10,23 +10,38 @@ import java.util.Collections
 class TerminalSession(
     val id: String,
     var name: String,
-    var cols: Int = 45,
+    var cols: Int = 80,
     var rows: Int = 24,
-    var maxScrollback: Int = 1000,
+    var maxScrollback: Int = 2000,
     var workingDir: File? = null,
-    var context: Context? = null
+    var context: Context? = null,
+    val isFailSafe: Boolean = false
 ) {
     var nativePtr: Long = 0
+        private set
+
+    var ptyFd: Int = -1
+        private set
+    var pid: Int = 0
         private set
 
     private var process: Process? = null
     private var processIn: OutputStream? = null
     private var processOut: InputStream? = null
     private var isRunning = false
+    var isFinished = false
+        private set
+    var exitCode = 0
+        private set
 
     var onScreenChanged: (() -> Unit)? = null
+    var onTitleChanged: ((String) -> Unit)? = null
+    var onBell: (() -> Unit)? = null
+    var onSessionFinished: ((TerminalSession) -> Unit)? = null
 
-    // Fallback in-memory buffer if native Rust lib is not linked
+    private var lastBellCount = 0
+
+    // Fallback in-memory buffer if native Rust engine or PTY is not linked
     private val fallbackLines = Collections.synchronizedList(ArrayList<StringBuilder>())
     private var fallbackCursorX = 0
     private var fallbackCursorY = 0
@@ -53,9 +68,9 @@ class TerminalSession(
         val width = (cols - 2).coerceIn(32, 54)
         val lineHoriz = "─".repeat(width - 2)
         val title = "TerApp Terminal ${VersionManager.CURRENT_VERSION}"
-        val arch = "Arch: ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"} • Rust VT100 Core"
-        val userland = "Userland: BusyBox 1.36.1 POSIX"
-        val pkg = "Tools: pkg • Type 'help' or 'pkg'"
+        val arch = "Arch: ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"} • Rust VT100 + PTY Core"
+        val userland = if (isFailSafe) "Mode: FAIL-SAFE RECOVERY SHELL" else "Userland: BusyBox 1.36.1 POSIX"
+        val pkg = if (isFailSafe) "System bin shell active" else "Tools: pkg • Type 'help' or 'pkg'"
 
         fun padCenter(text: String, len: Int): String {
             val trimmed = if (text.length > len) text.substring(0, len) else text
@@ -78,8 +93,6 @@ class TerminalSession(
         sb.append("\u001b[0;37m│").append(padLeft(userland, contentLen)).append("│\u001b[0m\r\n")
         sb.append("\u001b[0;36m│").append(padLeft(pkg, contentLen)).append("│\u001b[0m\r\n")
         sb.append("\u001b[1;36m└").append(lineHoriz).append("┘\u001b[0m\r\n")
-        sb.append("\u001b[0;90mChecking version status...\u001b[0m\r\n")
-        sb.append("~ $ ")
         return sb.toString()
     }
 
@@ -99,33 +112,114 @@ class TerminalSession(
             val shFile = File(usrBin, "sh")
             val busyboxFile = File(usrBin, "busybox")
 
-            val shellCommand: List<String> = if (shFile.exists() && shFile.canExecute()) {
-                listOf(shFile.absolutePath)
+            val shellCmd: String = if (isFailSafe) {
+                if (File("/system/bin/sh").exists()) "/system/bin/sh" else "sh"
+            } else if (shFile.exists() && shFile.canExecute()) {
+                shFile.absolutePath
             } else if (busyboxFile.exists() && busyboxFile.canExecute()) {
-                listOf(busyboxFile.absolutePath, "sh")
+                busyboxFile.absolutePath
             } else {
                 val nativeLib = context?.let { BootstrapManager.getBusyboxBinary(it) }
                 if (nativeLib != null && nativeLib.canExecute()) {
-                    listOf(nativeLib.absolutePath, "sh")
+                    nativeLib.absolutePath
                 } else if (File("/system/bin/sh").exists()) {
-                    listOf("/system/bin/sh")
+                    "/system/bin/sh"
                 } else {
-                    listOf("sh")
+                    "sh"
                 }
             }
 
-            val pb = ProcessBuilder(shellCommand)
+            val shellArgs = if (!isFailSafe && shellCmd.endsWith("busybox")) {
+                arrayOf(shellCmd, "sh", "-l")
+            } else {
+                arrayOf(shellCmd, "-l")
+            }
+
+            val envList = arrayOf(
+                "TERM=xterm-256color",
+                "COLORTERM=truecolor",
+                "HOME=${home.absolutePath}",
+                "PREFIX=${usrDir.absolutePath}",
+                "TMPDIR=${usrTmp.absolutePath}",
+                "SHELL=$shellCmd",
+                "PATH=${if (isFailSafe) "/system/bin:/system/xbin" else "${usrBin.absolutePath}:/system/bin:/system/xbin"}",
+                "BUSYBOX=${if (busyboxFile.exists()) busyboxFile.absolutePath else "busybox"}",
+                "COLUMNS=$cols",
+                "LINES=$rows",
+                "LANG=en_US.UTF-8"
+            )
+
+            // Try spawning with native PTY first
+            val pidArray = IntArray(1)
+            val masterFd = TerAppBridge.createSubprocessSafe(
+                cmd = shellCmd,
+                cwd = home.absolutePath,
+                args = shellArgs,
+                envVars = envList,
+                processIdArray = pidArray,
+                rows = rows,
+                cols = cols
+            )
+
+            if (masterFd >= 0) {
+                ptyFd = masterFd
+                pid = pidArray[0]
+                isRunning = true
+
+                // Feed initial banner
+                feedBytes(createInitialBanner().toByteArray())
+
+                // Start native PTY reader thread
+                Thread({
+                    val buffer = ByteArray(4096)
+                    while (isRunning && ptyFd >= 0) {
+                        val read = TerAppBridge.readPtySafe(ptyFd, buffer)
+                        if (read > 0) {
+                            val chunk = ByteArray(read)
+                            System.arraycopy(buffer, 0, chunk, 0, read)
+                            feedBytes(chunk)
+
+                            // Title updates
+                            val title = TerAppBridge.getTitleSafe(nativePtr)
+                            if (title.isNotEmpty() && title != name) {
+                                name = title
+                                onTitleChanged?.invoke(title)
+                            }
+
+                            // Bell events
+                            val bells = TerAppBridge.getBellCountSafe(nativePtr)
+                            if (bells != lastBellCount) {
+                                lastBellCount = bells
+                                onBell?.invoke()
+                            }
+
+                            onScreenChanged?.invoke()
+                        } else {
+                            // Process ended
+                            isFinished = true
+                            exitCode = TerAppBridge.waitForSafe(pid)
+                            feedBytes("\r\n\u001b[1;33m[Process completed (code $exitCode)]\u001b[0m\r\n".toByteArray())
+                            onScreenChanged?.invoke()
+                            onSessionFinished?.invoke(this)
+                            break
+                        }
+                    }
+                }, "PtyReader-$id").start()
+
+                return
+            }
+
+            // Fallback to ProcessBuilder if PTY could not be spawned
+            android.util.Log.w("TerminalSession", "PTY allocation failed, falling back to ProcessBuilder")
+            val pb = ProcessBuilder(*shellArgs)
             pb.directory(home)
             val env = pb.environment()
-            env["TERM"] = "xterm-256color"
-            env["HOME"] = home.absolutePath
-            env["PREFIX"] = usrDir.absolutePath
-            env["TMPDIR"] = usrTmp.absolutePath
-            env["SHELL"] = shellCommand[0]
-            env["PATH"] = "${usrBin.absolutePath}:/system/bin:/system/xbin"
-            env["BUSYBOX"] = if (busyboxFile.exists()) busyboxFile.absolutePath else "busybox"
-            env["COLUMNS"] = cols.toString()
-            env["LINES"] = rows.toString()
+            for (item in envList) {
+                val idx = item.indexOf('=')
+                if (idx != -1) {
+                    env[item.substring(0, idx)] = item.substring(idx + 1)
+                }
+            }
             pb.redirectErrorStream(true)
 
             val p = pb.start()
@@ -134,107 +228,32 @@ class TerminalSession(
             processOut = p.inputStream
             isRunning = true
 
-            // Initial banner
             feedBytes(createInitialBanner().toByteArray())
+            feedBytes(currentPrompt.toByteArray())
 
-            // Background version check
-            VersionManager.checkForUpdates { isLatest, latestVer, releaseUrl ->
-                if (!isRunning) return@checkForUpdates
-                val statusMsg = if (isLatest) {
-                    "\r\u001b[2K\u001b[1;32m✔ Version ${VersionManager.CURRENT_VERSION} is up-to-date\u001b[0m\r\n$currentPrompt"
-                } else {
-                    "\r\u001b[2K\u001b[1;33m⚡ Update available: $latestVer (Installed: ${VersionManager.CURRENT_VERSION})\u001b[0m\r\n\u001b[0;36m  Download: $releaseUrl\u001b[0m\r\n$currentPrompt"
-                }
-                feedBytes(statusMsg.toByteArray())
-                onScreenChanged?.invoke()
-            }
-
-            // Background reader thread from process
-            Thread {
+            Thread({
                 val buffer = ByteArray(4096)
-                val streamBuffer = StringBuilder()
-                val doneTag = "[TERAPP_DONE"
-
                 while (isRunning) {
                     try {
                         val read = processOut?.read(buffer) ?: -1
                         if (read > 0) {
-                            val chunk = String(buffer, 0, read, StandardCharsets.UTF_8)
-                            streamBuffer.append(chunk)
-
-                            while (true) {
-                                val idx = streamBuffer.indexOf(doneTag)
-                                if (idx != -1) {
-                                    val endIdx = streamBuffer.indexOf("]", idx)
-                                    if (endIdx != -1) {
-                                        val before = streamBuffer.substring(0, idx)
-                                        val tag = streamBuffer.substring(idx, endIdx + 1)
-                                        streamBuffer.delete(0, endIdx + 1)
-
-                                        if (streamBuffer.startsWith("\r\n")) {
-                                            streamBuffer.delete(0, 2)
-                                        } else if (streamBuffer.startsWith("\n")) {
-                                            streamBuffer.delete(0, 1)
-                                        }
-
-                                        if (before.isNotEmpty()) {
-                                            feedBytes(before.toByteArray())
-                                            // If output didn't end with a newline, break line before prompt
-                                            if (!before.endsWith("\n") && !before.endsWith("\r")) {
-                                                feedBytes(byteArrayOf(0x0D, 0x0A))
-                                            }
-                                        }
-
-                                        var promptPath = "~"
-                                        if (tag.startsWith("[TERAPP_DONE:") && tag.endsWith("]")) {
-                                            val rawPath = tag.substring("[TERAPP_DONE:".length, tag.length - 1).trim()
-                                            val canonicalCurrent = try {
-                                                File(rawPath).canonicalPath
-                                            } catch (e: Exception) {
-                                                rawPath
-                                            }
-                                            workingDir = File(canonicalCurrent)
-
-                                            promptPath = if (canonicalCurrent == canonicalHome) {
-                                                "~"
-                                            } else if (canonicalCurrent.startsWith("$canonicalHome/")) {
-                                                "~/" + canonicalCurrent.removePrefix("$canonicalHome/")
-                                            } else {
-                                                File(canonicalCurrent).name.ifEmpty { canonicalCurrent }
-                                            }
-                                        }
-
-                                        currentPrompt = "$promptPath $ "
-                                        feedBytes(currentPrompt.toByteArray())
-                                        onScreenChanged?.invoke()
-                                        continue
-                                    } else {
-                                        break
-                                    }
-                                } else {
-                                    val safeLen = streamBuffer.length - doneTag.length
-                                    if (safeLen > 0) {
-                                        val toFeed = streamBuffer.substring(0, safeLen)
-                                        streamBuffer.delete(0, safeLen)
-                                        feedBytes(toFeed.toByteArray())
-                                        onScreenChanged?.invoke()
-                                    }
-                                    break
-                                }
-                            }
+                            val chunk = ByteArray(read)
+                            System.arraycopy(buffer, 0, chunk, 0, read)
+                            feedBytes(chunk)
+                            onScreenChanged?.invoke()
                         } else if (read == -1) {
-                            if (streamBuffer.isNotEmpty()) {
-                                feedBytes(streamBuffer.toString().toByteArray())
-                                streamBuffer.clear()
-                                onScreenChanged?.invoke()
-                            }
+                            isFinished = true
+                            exitCode = try { p.waitFor() } catch (e: Exception) { 0 }
+                            feedBytes("\r\n\u001b[1;33m[Process completed (code $exitCode)]\u001b[0m\r\n".toByteArray())
+                            onScreenChanged?.invoke()
+                            onSessionFinished?.invoke(this)
                             break
                         }
                     } catch (e: Exception) {
                         break
                     }
                 }
-            }.start()
+            }, "FallbackReader-$id").start()
 
         } catch (e: Exception) {
             val err = "\u001b[1;31mFailed to spawn shell: ${e.message}\u001b[0m\r\n"
@@ -242,39 +261,12 @@ class TerminalSession(
         }
     }
 
-    fun reflowLines(newCols: Int) {
-        if (newCols <= 0) return
-        synchronized(fallbackLines) {
-            val reflowed = ArrayList<StringBuilder>()
-            for (sb in fallbackLines) {
-                val str = sb.toString()
-                if (str.length <= newCols) {
-                    reflowed.add(StringBuilder(str))
-                } else {
-                    var offset = 0
-                    while (offset < str.length) {
-                        val end = (offset + newCols).coerceAtMost(str.length)
-                        reflowed.add(StringBuilder(str.substring(offset, end)))
-                        offset = end
-                    }
-                }
-            }
-            fallbackLines.clear()
-            fallbackLines.addAll(reflowed)
-            while (fallbackLines.size > maxScrollback + rows) {
-                fallbackLines.removeAt(0)
-            }
-            fallbackCursorY = (fallbackLines.size - 1).coerceAtLeast(0)
-            fallbackCursorX = fallbackLines.lastOrNull()?.length?.coerceIn(0, newCols - 1) ?: 0
-        }
-    }
-
     fun feedBytes(bytes: ByteArray) {
         val normalized = normalizeNewlines(bytes)
-        feedFallback(normalized)
         if (nativePtr != 0L) {
             TerAppBridge.feedBytesSafe(nativePtr, normalized)
         }
+        feedFallback(normalized)
     }
 
     private fun normalizeNewlines(bytes: ByteArray): ByteArray {
@@ -303,7 +295,7 @@ class TerminalSession(
             while (i < str.length) {
                 val c = str[i]
                 if (c == '\u001b') {
-                    // Skip ANSI escape sequences
+                    // Skip ANSI escape sequence in fallback
                     var j = i + 1
                     if (j < str.length && (str[j] == '[' || str[j] == ']' || str[j] == '(')) {
                         j++
@@ -335,7 +327,6 @@ class TerminalSession(
                         }
                     }
                 } else if (c.code in 32..126 || c.code > 127) {
-                    // Check right edge auto-wrap
                     if (fallbackCursorX >= cols) {
                         fallbackCursorX = 0
                         fallbackCursorY++
@@ -358,18 +349,6 @@ class TerminalSession(
                         line.append(c)
                     }
                     fallbackCursorX++
-
-                    if (fallbackCursorX >= cols) {
-                        fallbackCursorX = 0
-                        fallbackCursorY++
-                        if (fallbackCursorY >= fallbackLines.size) {
-                            fallbackLines.add(StringBuilder())
-                        }
-                        while (fallbackLines.size > maxScrollback + rows) {
-                            fallbackLines.removeAt(0)
-                            if (fallbackCursorY > 0) fallbackCursorY--
-                        }
-                    }
                 }
                 i++
             }
@@ -386,12 +365,20 @@ class TerminalSession(
     }
 
     fun getScrollbackLength(): Int {
-        synchronized(fallbackLines) {
-            return (fallbackLines.size - rows).coerceAtLeast(0)
+        return if (nativePtr != 0L) {
+            TerAppBridge.getScrollbackLengthSafe(nativePtr)
+        } else {
+            synchronized(fallbackLines) {
+                (fallbackLines.size - rows).coerceAtLeast(0)
+            }
         }
     }
 
     fun getLineText(row: Int, scrollOffset: Int = 0): String {
+        if (nativePtr != 0L) {
+            val text = TerAppBridge.getLineTextSafe(nativePtr, row, scrollOffset)
+            if (text.isNotEmpty()) return text
+        }
         synchronized(fallbackLines) {
             val total = fallbackLines.size
             val startRow = (total - rows).coerceAtLeast(0)
@@ -405,171 +392,131 @@ class TerminalSession(
         }
     }
 
+    fun getLineColors(
+        row: Int,
+        scrollOffset: Int = 0,
+        defaultFg: Int,
+        defaultBg: Int,
+        palette16: IntArray
+    ): IntArray? {
+        if (nativePtr != 0L) {
+            return TerAppBridge.getLineColorsSafe(nativePtr, row, scrollOffset, defaultFg, defaultBg, palette16)
+        }
+        return null
+    }
+
     fun getVisibleText(): String {
         val sb = StringBuilder()
-        synchronized(fallbackLines) {
-            val total = fallbackLines.size
-            val start = (total - rows).coerceAtLeast(0)
-            for (i in start until total) {
-                val raw = fallbackLines[i].toString().trimEnd()
-                sb.append(if (raw.length > cols) raw.substring(0, cols) else raw)
-                if (i < total - 1) sb.append("\n")
+        for (r in 0 until rows) {
+            val line = getLineText(r, 0).trimEnd()
+            if (line.isNotEmpty() || r < rows - 1) {
+                sb.append(line).append("\n")
             }
         }
-        return sb.toString().trim()
+        return sb.toString().trimEnd()
     }
 
     fun getCursorX(): Int {
         return if (nativePtr != 0L) {
-            TerAppBridge.getCursorXSafe(nativePtr).coerceIn(0, cols - 1)
+            TerAppBridge.getCursorXSafe(nativePtr).coerceIn(0, (cols - 1).coerceAtLeast(0))
         } else {
-            fallbackCursorX.coerceIn(0, cols - 1)
+            fallbackCursorX.coerceIn(0, (cols - 1).coerceAtLeast(0))
         }
     }
 
     fun getCursorY(): Int {
         return if (nativePtr != 0L) {
-            TerAppBridge.getCursorYSafe(nativePtr).coerceIn(0, rows - 1)
+            TerAppBridge.getCursorYSafe(nativePtr).coerceIn(0, (rows - 1).coerceAtLeast(0))
         } else {
             val total = fallbackLines.size
             val startRow = (total - rows).coerceAtLeast(0)
-            (fallbackCursorY - startRow).coerceIn(0, rows - 1)
+            (fallbackCursorY - startRow).coerceIn(0, (rows - 1).coerceAtLeast(0))
+        }
+    }
+
+    fun isCursorVisible(): Boolean {
+        return if (nativePtr != 0L) {
+            TerAppBridge.isCursorVisibleSafe(nativePtr)
+        } else {
+            true
+        }
+    }
+
+    fun isAltScreen(): Boolean {
+        return if (nativePtr != 0L) {
+            TerAppBridge.isAltScreenSafe(nativePtr)
+        } else {
+            false
         }
     }
 
     fun writeInput(text: String) {
-        writeBytes(text.toByteArray())
+        writeBytes(text.toByteArray(StandardCharsets.UTF_8))
     }
 
     fun writeBytes(bytes: ByteArray) {
-        for (b in bytes) {
-            when (b.toInt()) {
-                0x0A, 0x0D -> { // Enter
-                    feedBytes(byteArrayOf(0x0D, 0x0A))
-                    val cmd = inputLineBuffer.toString().trim()
-                    inputLineBuffer.clear()
-
-                    if (cmd.isNotEmpty()) {
-                        when (cmd) {
-                            "clear" -> {
-                                initFallbackBuffer()
-                                if (nativePtr != 0L) {
-                                    TerAppBridge.feedBytesSafe(nativePtr, "\u001b[2J\u001b[H".toByteArray())
-                                }
-                                feedBytes(currentPrompt.toByteArray())
-                                onScreenChanged?.invoke()
-                                return
-                            }
-                            "help" -> {
-                                val engine = if (nativePtr != 0L) "Rust VT100 Core" else "Fallback JVM Buffer"
-                                val helpMsg = "TerApp Terminal Commands [$engine]:\r\n" +
-                                              "  Version: ${VersionManager.CURRENT_VERSION}\r\n" +
-                                              "  POSIX: ls, grep, awk, sed, tar, vi, curl, wget, ps, top\r\n" +
-                                              "  Package Manager: pkg (help, list, search, doctor, update)\r\n" +
-                                              "  Built-in: clear, help, mem, version\r\n$currentPrompt"
-                                feedBytes(helpMsg.toByteArray())
-                                onScreenChanged?.invoke()
-                                return
-                            }
-                            "version" -> {
-                                val verMsg = "TerApp Mobile Terminal ${VersionManager.CURRENT_VERSION}\r\n" +
-                                             "  Architecture: ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"}\r\n" +
-                                             "  Engine: Rust VT100 Engine (Zero-Allocation Parser)\r\n" +
-                                             "  Userland: BusyBox 1.36.1 POSIX\r\n" +
-                                             "  Releases: ${VersionManager.REPO_URL}/releases\r\n" +
-                                             "Checking for updates...\r\n"
-                                feedBytes(verMsg.toByteArray())
-                                VersionManager.checkForUpdates { isLatest, latestVer, releaseUrl ->
-                                    val status = if (isLatest) {
-                                        "\u001b[1;32m✔ Version is up-to-date (${VersionManager.CURRENT_VERSION})\u001b[0m\r\n$currentPrompt"
-                                    } else {
-                                        "\u001b[1;33m⚡ Update available: $latestVer\u001b[0m\r\n\u001b[0;36m  $releaseUrl\u001b[0m\r\n$currentPrompt"
-                                    }
-                                    feedBytes(status.toByteArray())
-                                    onScreenChanged?.invoke()
-                                }
-                                onScreenChanged?.invoke()
-                                return
-                            }
-                            "mem" -> {
-                                val engine = if (nativePtr != 0L) "Rust VT100 Core (~324 KB)" else "Fallback JVM Buffer"
-                                val memMsg = "Memory Status:\r\n  Terminal Engine: $engine\r\n  Circular Ring Buffer: Active\r\n  POSIX Userland: BusyBox 1.36.1\r\n$currentPrompt"
-                                feedBytes(memMsg.toByteArray())
-                                onScreenChanged?.invoke()
-                                return
-                            }
-                            else -> {
-                                try {
-                                    val script = "$cmd; echo -n \"[TERAPP_DONE:\${PWD}]\"\n"
-                                    processIn?.write(script.toByteArray())
-                                    processIn?.flush()
-                                } catch (e: Exception) {
-                                    val err = "Error writing to shell: ${e.message}\r\n$currentPrompt"
-                                    feedBytes(err.toByteArray())
-                                    onScreenChanged?.invoke()
-                                }
-                            }
-                        }
-                    } else {
+        if (ptyFd >= 0) {
+            // Write directly to master PTY - shell echoes and processes
+            TerAppBridge.writePtySafe(ptyFd, bytes)
+        } else if (processIn != null) {
+            // Fallback line buffered
+            for (b in bytes) {
+                when (b.toInt()) {
+                    0x0A, 0x0D -> {
+                        feedBytes(byteArrayOf(0x0D, 0x0A))
+                        val cmd = inputLineBuffer.toString().trim()
+                        inputLineBuffer.clear()
+                        try {
+                            processIn?.write("$cmd\n".toByteArray())
+                            processIn?.flush()
+                        } catch (ignored: Exception) {}
                         feedBytes(currentPrompt.toByteArray())
                         onScreenChanged?.invoke()
                     }
-                }
-                0x08, 0x7F -> { // Backspace
-                    if (inputLineBuffer.isNotEmpty()) {
-                        inputLineBuffer.deleteCharAt(inputLineBuffer.length - 1)
-                        if (nativePtr != 0L) {
+                    0x08, 0x7F -> {
+                        if (inputLineBuffer.isNotEmpty()) {
+                            inputLineBuffer.deleteCharAt(inputLineBuffer.length - 1)
                             feedBytes(byteArrayOf(0x08, 0x20, 0x08))
-                        } else {
-                            feedBytes(byteArrayOf(0x08))
+                            onScreenChanged?.invoke()
                         }
+                    }
+                    else -> {
+                        inputLineBuffer.append(b.toInt().toChar())
+                        feedBytes(byteArrayOf(b))
                         onScreenChanged?.invoke()
                     }
-                }
-                0x03 -> { // Ctrl+C
-                    inputLineBuffer.clear()
-                    feedBytes("^C\r\n$currentPrompt".toByteArray())
-                    try {
-                        processIn?.write(byteArrayOf(0x03))
-                        processIn?.flush()
-                    } catch (ignored: Exception) {}
-                    onScreenChanged?.invoke()
-                }
-                else -> {
-                    val ch = b.toInt().toChar()
-                    inputLineBuffer.append(ch)
-                    feedBytes(byteArrayOf(b))
-                    onScreenChanged?.invoke()
                 }
             }
         }
     }
 
     fun resize(newCols: Int, newRows: Int) {
-        val oldCols = cols
         cols = newCols.coerceAtLeast(10)
         rows = newRows.coerceAtLeast(5)
 
-        if (cols != oldCols) {
-            reflowLines(cols)
-        }
-
-        try {
-            processIn?.write("export COLUMNS=$cols LINES=$rows; stty cols $cols rows $rows 2>/dev/null\n".toByteArray())
-            processIn?.flush()
-        } catch (ignored: Exception) {}
-
         if (nativePtr != 0L) {
             TerAppBridge.resizeSafe(nativePtr, cols, rows)
+        }
+        if (ptyFd >= 0) {
+            TerAppBridge.setPtyWindowSizeSafe(ptyFd, rows, cols)
+        } else {
+            try {
+                processIn?.write("stty cols $cols rows $rows 2>/dev/null\n".toByteArray())
+                processIn?.flush()
+            } catch (ignored: Exception) {}
         }
         onScreenChanged?.invoke()
     }
 
     fun destroy() {
         isRunning = false
-        try { processIn?.close() } catch (e: Exception) {}
-        try { processOut?.close() } catch (e: Exception) {}
-        try { process?.destroy() } catch (e: Exception) {}
+        if (ptyFd >= 0) {
+            TerAppBridge.closePtySafe(ptyFd)
+            ptyFd = -1
+        }
+        try { processIn?.close() } catch (ignored: Exception) {}
+        try { processOut?.close() } catch (ignored: Exception) {}
+        try { process?.destroy() } catch (ignored: Exception) {}
         if (nativePtr != 0L) {
             TerAppBridge.freeTerminalSafe(nativePtr)
             nativePtr = 0

@@ -9,6 +9,16 @@
         app:showAsAction="ifRoom" />
 
     <item
+        android:id="@+id/action_failsafe_session"
+        android:title="@string/action_failsafe_session"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_rename_session"
+        android:title="@string/action_rename_session"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_copy"
         android:title="@string/action_copy"
         app:showAsAction="never" />
@@ -32,6 +42,16 @@
     <item
         android:id="@+id/action_theme"
         android:title="@string/menu_theme"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_zoom_in"
+        android:title="@string/action_zoom_in"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_zoom_out"
+        android:title="@string/action_zoom_out"
         app:showAsAction="never" />
 
     <item

@@ -180,6 +180,8 @@ object BootstrapManager {
                         "export TMPDIR=\"${usrTmp.absolutePath}\"\n" +
                         "export PATH=\"${usrBin.absolutePath}:/system/bin:/system/xbin\"\n" +
                         "export TERM=\"xterm-256color\"\n" +
+                        "export COLORTERM=\"truecolor\"\n" +
+                        "export LANG=\"en_US.UTF-8\"\n" +
                         "alias pkg=\"${usrBin.absolutePath}/pkg\"\n"
                     )
                 } catch (ignored: Exception) {}
@@ -189,8 +191,13 @@ object BootstrapManager {
             if (!userProfile.exists()) {
                 try {
                     userProfile.writeText(
-                        "export PATH=\"${usrBin.absolutePath}:/system/bin:/system/xbin\"\n" +
+                        "export PREFIX=\"${usrDir.absolutePath}\"\n" +
+                        "export HOME=\"${homeDir.absolutePath}\"\n" +
                         "export TMPDIR=\"${usrTmp.absolutePath}\"\n" +
+                        "export PATH=\"${usrBin.absolutePath}:/system/bin:/system/xbin\"\n" +
+                        "export TERM=\"xterm-256color\"\n" +
+                        "export COLORTERM=\"truecolor\"\n" +
+                        "export LANG=\"en_US.UTF-8\"\n" +
                         "alias pkg=\"${usrBin.absolutePath}/pkg\"\n"
                     )
                 } catch (ignored: Exception) {}
@@ -291,7 +298,10 @@ object BootstrapManager {
                     echo "  list              List all installed userland commands"
                     echo "  search <query>    Search for commands/applets"
                     echo "  install <applet>  Ensure applet symlink exists from BusyBox"
+                    echo "  uninstall <tool>  Remove a command symlink from usr/bin"
                     echo "  info <tool>       Show details about a command or tool"
+                    echo "  reinstall         Re-create all BusyBox applet symlinks"
+                    echo "  env               Print active shell environment variables"
                     echo "  update            Refresh and verify userland symlinks"
                     echo "  doctor            Check system health and environment"
                     echo ""
@@ -337,6 +347,32 @@ object BootstrapManager {
                             fi
                         fi
                         ;;
+                    uninstall)
+                        if [ -z "${'$'}2" ]; then
+                            echo "Error: Please specify tool name to uninstall."
+                            exit 1
+                        fi
+                        TARGET="${'$'}BIN_DIR/${'$'}2"
+                        if [ "${'$'}2" = "busybox" ] || [ "${'$'}2" = "sh" ] || [ "${'$'}2" = "pkg" ]; then
+                            echo "Error: Cannot uninstall core system component '${'$'}2'."
+                            exit 1
+                        fi
+                        if [ -e "${'$'}TARGET" ] || [ -L "${'$'}TARGET" ]; then
+                            rm -f "${'$'}TARGET"
+                            echo "Removed ${'$'}TARGET"
+                        else
+                            echo "Tool '${'$'}2' not found."
+                        fi
+                        ;;
+                    reinstall|reset)
+                        echo "Re-installing all BusyBox POSIX applets..."
+                        "${'$'}BUSYBOX" --install -s "${'$'}BIN_DIR" 2>/dev/null
+                        echo "All applet symlinks successfully refreshed."
+                        ;;
+                    env)
+                        echo "Terminal Environment:"
+                        env | sort
+                        ;;
                     info)
                         if [ -z "${'$'}2" ]; then
                             echo "Error: Please specify tool name."
@@ -362,11 +398,13 @@ object BootstrapManager {
                         echo "OS: ${'$'}(uname -s -r 2>/dev/null || echo Android)"
                         echo "Architecture: ${'$'}(uname -m 2>/dev/null || echo aarch64)"
                         echo "BusyBox: ${'$'}("${'$'}BUSYBOX" | head -n 1 2>/dev/null || echo BusyBox)"
+                        echo "Engine: Rust VT100 + Native POSIX PTY"
                         echo "PREFIX: ${'$'}PREFIX"
                         echo "HOME: ${'$'}HOME"
                         echo "PATH: ${'$'}PATH"
                         echo "Applets Installed: ${'$'}(ls -1 "${'$'}BIN_DIR" 2>/dev/null | wc -l)"
-                        echo "Status: System Healthy"
+                        echo "Disk Available: ${'$'}(df -h "${'$'}HOME" 2>/dev/null | tail -n 1 | awk '{print ${'$'}4}')"
+                        echo "Status: System Healthy & Operational"
                         echo "==============================================="
                         ;;
                     *)

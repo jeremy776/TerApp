@@ -23,9 +23,14 @@ Termux revolutionized running Linux software on mobile devices without requiring
 
 **TerApp** takes the concepts pioneered by the Termux team and rebuilds them with a focus on native systems efficiency:
 * **Ultra-Low Memory Footprint** (~9.38 KB active screen grid; sub-20 MB total app memory).
-* **Rust Native VT100 Engine** (`terapp-core` & `libterapp_android.so`) for CSI/ANSI escape parsing.
+* **Native POSIX PTY Engine** (`/dev/ptmx` -> `/dev/pts/*`) with UTF-8 raw mode and dynamic `TIOCSWINSZ` window sizing.
+* **Rust Native VT100 Engine** (`terapp-core` & `libterapp_android.so`) with Alternate Screen Buffer (`\e[?1049h`), 256-color & 24-bit TrueColor RGB.
+* **Full-Screen Interactive App Support** (`vi`, `nano`, `top`, `htop`, `less`, `more`, interactive Python, and REPLs).
+* **Dynamic Window Title & Bell** (OSC 0/2 title tracking and haptic vibration on bell `\x07`).
+* **Fail-Safe Recovery Shell** for troubleshooting broken userland scripts or corrupted environment variables.
 * **Built-in POSIX Userland** (BusyBox 1.36.1) without requiring root or external package downloads.
 * **Lightweight Package Manager (`pkg`)** with self-healing userland, applet search, and system diagnostics (`pkg doctor`).
+* **Extended 26-Key Toolbar & Long-Press Menu** (`ESC`, `TAB`, `CTRL`, `ALT`, `HOME`, `END`, `PGUP`, `PGDN`, `INS`, `DEL`, quotes, symbols, arrows).
 * **Real-time Syntax Highlighting** for typed commands, flags, folders, executable `.sh` scripts, strings, and errors.
 * **Momentum Gesture Scrolling** with thread-safe circular scrollback buffer and modern scrollbar indicator.
 * **Split-Screen Dual Panes** for running two simultaneous terminal sessions.
@@ -40,11 +45,14 @@ Termux revolutionized running Linux software on mobile devices without requiring
 | :--- | :--- | :--- | :--- |
 | **Language** | Java & Kotlin | **Rust + Kotlin** | Zero-cost abstractions, minimal memory overhead. |
 | **Terminal Core** | Java Terminal Emulator | **`terapp-core` (Zero-dep Rust)** | Raw byte stream parsing with 0 dynamic allocations during execution. |
+| **PTY Subprocess** | Native C (`termux.c`) | **Native Rust (`terapp-pty`)** | Memory-safe POSIX pseudoterminal (`/dev/ptmx`) allocation & job control. |
 | **Screen Buffer** | Java Objects & Text Layout | **Bit-packed `Cell` & Ring Buffer** | ~9.38 KB active screen grid; eliminates heap fragmentation. |
+| **Alt Screen Buffer** | Supported | **Supported (`\e[?1049h`/`l`)** | Native isolation for full-screen apps (`vi`, `nano`, `top`). |
 | **Scrollback** | Dynamic ArrayList / Deque | **Circular Fixed-Capacity Buffer** | Thread-safe, O(1) recycling of scrolled lines without re-allocations. |
 | **Syntax Highlighting** | Monochrome / Bash Prompts | **Real-Time Client Tokenizer** | Instant color highlighting for folders, `.sh`, options, and errors. |
 | **Userland** | GNU Coreutils via `apt` | **BusyBox 1.36.1 + `pkg` Helper** | Out-of-the-box POSIX tools (`ls`, `grep`, `awk`, `sed`, `tar`, `vi`, `curl`, `wget`) without root. |
 | **Panes / Split View** | Third-party multiplexers (`tmux`) | **Native Dual-Pane Split Screen** | Built-in split terminal views with independent shell contexts. |
+| **Fail-Safe Shell** | Supported | **Supported (`FailSafe Session`)** | Emergency clean rescue shell bypassing user dotfiles and broken PATH. |
 | **Deployment** | Android Studio / Gradle | **Pure CLI (`gradlew`) + GitHub Actions CI/CD** | Automated signed APK building, SHA256 verification, and releases. |
 
 ---

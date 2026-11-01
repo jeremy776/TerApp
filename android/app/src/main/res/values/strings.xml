@@ -13,4 +13,8 @@
     <string name="menu_theme">Themes</string>
     <string name="menu_wakelock">Keep Awake</string>
     <string name="menu_about">About &amp; Updates</string>
+    <string name="action_failsafe_session">New Fail-Safe Session</string>
+    <string name="action_rename_session">Rename Session</string>
+    <string name="action_zoom_in">Zoom In</string>
+    <string name="action_zoom_out">Zoom Out</string>
 </resources>

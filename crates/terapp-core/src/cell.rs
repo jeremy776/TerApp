@@ -3,7 +3,45 @@
 pub enum Color {
     Default,
     Ansi16(u8),       // 0-15 standard terminal colors
-    Rgb(u8, u8, u8),  // TrueColor fallback
+    Ansi256(u8),      // 0-255 extended xterm colors
+    Rgb(u8, u8, u8),  // TrueColor 24-bit fallback
+}
+
+impl Color {
+    /// Converts color to a 32-bit ARGB integer given the default foreground/background
+    /// and a 16-color ANSI palette.
+    pub fn to_argb(&self, default_color: u32, palette16: &[u32; 16]) -> u32 {
+        match *self {
+            Color::Default => default_color,
+            Color::Ansi16(idx) => {
+                let i = (idx as usize).min(15);
+                palette16[i]
+            }
+            Color::Ansi256(idx) => {
+                if idx < 16 {
+                    palette16[idx as usize]
+                } else if idx < 232 {
+                    // 6x6x6 color cube
+                    let mut code = idx - 16;
+                    let b = code % 6;
+                    code /= 6;
+                    let g = code % 6;
+                    let r = code / 6;
+                    let r_val = if r == 0 { 0 } else { 55 + r * 40 } as u32;
+                    let g_val = if g == 0 { 0 } else { 55 + g * 40 } as u32;
+                    let b_val = if b == 0 { 0 } else { 55 + b * 40 } as u32;
+                    0xFF000000 | (r_val << 16) | (g_val << 8) | b_val
+                } else {
+                    // 24 grayscale levels from 232 to 255
+                    let gray = (8 + (idx - 232) * 10) as u32;
+                    0xFF000000 | (gray << 16) | (gray << 8) | gray
+                }
+            }
+            Color::Rgb(r, g, b) => {
+                0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+            }
+        }
+    }
 }
 
 pub mod cell_flags {

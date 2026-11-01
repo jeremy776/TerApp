@@ -6,20 +6,25 @@ enum ParserState {
     Ground,
     Escape,
     Csi,
+    Osc,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cursor {
     pub x: usize,
     pub y: usize,
     pub visible: bool,
 }
 
-/// Lightweight ANSI/VT100 parser with zero dynamic memory allocation during stream processing.
+/// High-performance ANSI/VT100/xterm emulator with zero dynamic memory allocation
+/// during normal byte stream processing.
 #[derive(Debug)]
 pub struct TerminalEmulator {
     pub buffer: TerminalBuffer,
     pub cursor: Cursor,
+    saved_cursor: (usize, usize),
+    pub title: String,
+    pub bell_count: u32,
     current_fg: Color,
     current_bg: Color,
     current_flags: u8,
@@ -27,8 +32,10 @@ pub struct TerminalEmulator {
     csi_params: [u16; 16],
     csi_param_count: usize,
     has_param: bool,
+    is_dec_private: bool,
     utf8_buf: [u8; 4],
     utf8_len: usize,
+    osc_buf: Vec<u8>,
 }
 
 impl TerminalEmulator {
@@ -40,6 +47,9 @@ impl TerminalEmulator {
                 y: 0,
                 visible: true,
             },
+            saved_cursor: (0, 0),
+            title: String::new(),
+            bell_count: 0,
             current_fg: Color::Default,
             current_bg: Color::Default,
             current_flags: 0,
@@ -47,8 +57,10 @@ impl TerminalEmulator {
             csi_params: [0; 16],
             csi_param_count: 0,
             has_param: false,
+            is_dec_private: false,
             utf8_buf: [0; 4],
             utf8_len: 0,
+            osc_buf: Vec::with_capacity(128),
         }
     }
 
@@ -75,6 +87,10 @@ impl TerminalEmulator {
                 b'\x1b' => {
                     self.state = ParserState::Escape;
                 }
+                b'\x07' => {
+                    // BEL character
+                    self.bell_count = self.bell_count.wrapping_add(1);
+                }
                 b'\r' => {
                     self.cursor.x = 0;
                 }
@@ -91,7 +107,7 @@ impl TerminalEmulator {
                     // Tab stop (every 8 columns)
                     self.cursor.x = (self.cursor.x + 8) & !7;
                     if self.cursor.x >= self.buffer.cols {
-                        self.cursor.x = self.buffer.cols - 1;
+                        self.cursor.x = self.buffer.cols.saturating_sub(1);
                     }
                 }
                 0x20..=0x7E => {
@@ -122,12 +138,40 @@ impl TerminalEmulator {
                     self.csi_param_count = 0;
                     self.csi_params = [0; 16];
                     self.has_param = false;
+                    self.is_dec_private = false;
+                }
+                b']' => {
+                    self.state = ParserState::Osc;
+                    self.osc_buf.clear();
+                }
+                b'7' => {
+                    // Save Cursor (DECSC)
+                    self.saved_cursor = (self.cursor.x, self.cursor.y);
+                    self.state = ParserState::Ground;
+                }
+                b'8' => {
+                    // Restore Cursor (DECRC)
+                    self.cursor.x = self.saved_cursor.0.min(self.buffer.cols.saturating_sub(1));
+                    self.cursor.y = self.saved_cursor.1.min(self.buffer.rows.saturating_sub(1));
+                    self.state = ParserState::Ground;
+                }
+                b'M' => {
+                    // Reverse Index (RI): move cursor up 1 line, or scroll down if at top
+                    if self.cursor.y == 0 {
+                        self.buffer.scroll_down();
+                    } else {
+                        self.cursor.y -= 1;
+                    }
+                    self.state = ParserState::Ground;
                 }
                 _ => {
                     self.state = ParserState::Ground;
                 }
             },
             ParserState::Csi => match byte {
+                b'?' => {
+                    self.is_dec_private = true;
+                }
                 b'0'..=b'9' => {
                     let digit = (byte - b'0') as u16;
                     if self.csi_param_count < self.csi_params.len() {
@@ -148,6 +192,33 @@ impl TerminalEmulator {
                         self.csi_param_count += 1;
                     }
                     self.handle_sgr();
+                    self.state = ParserState::Ground;
+                }
+                b'h' | b'l' => {
+                    let enable = byte == b'h';
+                    if self.is_dec_private {
+                        let param = self.csi_params[0];
+                        match param {
+                            1049 | 47 => {
+                                // Alternate screen buffer switch
+                                if enable {
+                                    self.saved_cursor = (self.cursor.x, self.cursor.y);
+                                    self.buffer.switch_to_alt_screen();
+                                    self.cursor.x = 0;
+                                    self.cursor.y = 0;
+                                } else {
+                                    self.buffer.switch_to_main_screen();
+                                    self.cursor.x = self.saved_cursor.0.min(self.buffer.cols.saturating_sub(1));
+                                    self.cursor.y = self.saved_cursor.1.min(self.buffer.rows.saturating_sub(1));
+                                }
+                            }
+                            25 => {
+                                // Show / Hide cursor
+                                self.cursor.visible = enable;
+                            }
+                            _ => {}
+                        }
+                    }
                     self.state = ParserState::Ground;
                 }
                 b'A' => {
@@ -174,10 +245,30 @@ impl TerminalEmulator {
                     self.cursor.x = self.cursor.x.saturating_sub(count);
                     self.state = ParserState::Ground;
                 }
+                b'E' => {
+                    // Cursor Next Line
+                    let count = self.csi_params[0].max(1) as usize;
+                    self.cursor.y = (self.cursor.y + count).min(self.buffer.rows.saturating_sub(1));
+                    self.cursor.x = 0;
+                    self.state = ParserState::Ground;
+                }
+                b'F' => {
+                    // Cursor Preceding Line
+                    let count = self.csi_params[0].max(1) as usize;
+                    self.cursor.y = self.cursor.y.saturating_sub(count);
+                    self.cursor.x = 0;
+                    self.state = ParserState::Ground;
+                }
                 b'G' => {
                     // Cursor Horizontal Absolute
                     let col = if self.csi_params[0] > 0 { self.csi_params[0] - 1 } else { 0 } as usize;
                     self.cursor.x = col.min(self.buffer.cols.saturating_sub(1));
+                    self.state = ParserState::Ground;
+                }
+                b'd' => {
+                    // Line Position Absolute (VPA)
+                    let line = if self.csi_params[0] > 0 { self.csi_params[0] - 1 } else { 0 } as usize;
+                    self.cursor.y = line.min(self.buffer.rows.saturating_sub(1));
                     self.state = ParserState::Ground;
                 }
                 b'H' | b'f' => {
@@ -209,11 +300,13 @@ impl TerminalEmulator {
                 b'K' => {
                     // Erase in Line
                     let param = self.csi_params[0];
-                    if let Some(row) = self.buffer.screen.get_mut(self.cursor.y) {
+                    let cols = self.buffer.cols;
+                    let cursor_x = self.cursor.x;
+                    if let Some(row) = self.buffer.active_screen_mut().get_mut(self.cursor.y) {
                         match param {
                             0 => {
                                 // Clear from cursor to end of line
-                                for x in self.cursor.x..self.buffer.cols {
+                                for x in cursor_x..cols {
                                     if let Some(cell) = row.cells.get_mut(x) {
                                         *cell = Cell::EMPTY;
                                     }
@@ -221,7 +314,7 @@ impl TerminalEmulator {
                             }
                             1 => {
                                 // Clear from start of line to cursor
-                                for x in 0..=self.cursor.x.min(self.buffer.cols.saturating_sub(1)) {
+                                for x in 0..=cursor_x.min(cols.saturating_sub(1)) {
                                     if let Some(cell) = row.cells.get_mut(x) {
                                         *cell = Cell::EMPTY;
                                     }
@@ -238,11 +331,83 @@ impl TerminalEmulator {
                     }
                     self.state = ParserState::Ground;
                 }
+                b'L' => {
+                    // Insert Line(s)
+                    let count = self.csi_params[0].max(1) as usize;
+                    self.buffer.insert_lines(self.cursor.y, count);
+                    self.state = ParserState::Ground;
+                }
+                b'M' => {
+                    // Delete Line(s)
+                    let count = self.csi_params[0].max(1) as usize;
+                    self.buffer.delete_lines(self.cursor.y, count);
+                    self.state = ParserState::Ground;
+                }
+                b'@' => {
+                    // Insert Character(s)
+                    let count = self.csi_params[0].max(1) as usize;
+                    self.buffer.insert_cells(self.cursor.y, self.cursor.x, count);
+                    self.state = ParserState::Ground;
+                }
+                b'P' => {
+                    // Delete Character(s)
+                    let count = self.csi_params[0].max(1) as usize;
+                    self.buffer.delete_cells(self.cursor.y, self.cursor.x, count);
+                    self.state = ParserState::Ground;
+                }
+                b'X' => {
+                    // Erase Character(s)
+                    let count = self.csi_params[0].max(1) as usize;
+                    self.buffer.erase_cells(self.cursor.y, self.cursor.x, count);
+                    self.state = ParserState::Ground;
+                }
+                b'S' => {
+                    // Scroll Up
+                    let count = self.csi_params[0].max(1) as usize;
+                    for _ in 0..count {
+                        self.buffer.scroll_up();
+                    }
+                    self.state = ParserState::Ground;
+                }
+                b'T' => {
+                    // Scroll Down
+                    let count = self.csi_params[0].max(1) as usize;
+                    for _ in 0..count {
+                        self.buffer.scroll_down();
+                    }
+                    self.state = ParserState::Ground;
+                }
+                b's' => {
+                    // Save Cursor (ANSI)
+                    self.saved_cursor = (self.cursor.x, self.cursor.y);
+                    self.state = ParserState::Ground;
+                }
+                b'u' => {
+                    // Restore Cursor (ANSI)
+                    self.cursor.x = self.saved_cursor.0.min(self.buffer.cols.saturating_sub(1));
+                    self.cursor.y = self.saved_cursor.1.min(self.buffer.rows.saturating_sub(1));
+                    self.state = ParserState::Ground;
+                }
                 _ => {
                     // Unhandled or finished sequence
                     self.state = ParserState::Ground;
                 }
             },
+            ParserState::Osc => {
+                if byte == b'\x07' || byte == b'\x1b' {
+                    // End of OSC string
+                    if let Ok(osc_str) = std::str::from_utf8(&self.osc_buf) {
+                        // OSC 0;title or OSC 2;title sets terminal window title
+                        if osc_str.starts_with("0;") || osc_str.starts_with("2;") {
+                            let title_part = &osc_str[2..];
+                            self.title = title_part.to_string();
+                        }
+                    }
+                    self.state = ParserState::Ground;
+                } else if self.osc_buf.len() < 256 {
+                    self.osc_buf.push(byte);
+                }
+            }
         }
     }
 
@@ -279,7 +444,8 @@ impl TerminalEmulator {
             return;
         }
 
-        for i in 0..self.csi_param_count {
+        let mut i = 0;
+        while i < self.csi_param_count {
             match self.csi_params[i] {
                 0 => {
                     self.current_fg = Color::Default;
@@ -291,18 +457,48 @@ impl TerminalEmulator {
                 3 => self.current_flags |= cell_flags::ITALIC,
                 4 => self.current_flags |= cell_flags::UNDERLINE,
                 7 => self.current_flags |= cell_flags::INVERSE,
+                8 => self.current_flags |= cell_flags::HIDDEN,
+                9 => self.current_flags |= cell_flags::STRIKETHROUGH,
                 22 => self.current_flags &= !(cell_flags::BOLD | cell_flags::DIM),
                 23 => self.current_flags &= !cell_flags::ITALIC,
                 24 => self.current_flags &= !cell_flags::UNDERLINE,
                 27 => self.current_flags &= !cell_flags::INVERSE,
+                28 => self.current_flags &= !cell_flags::HIDDEN,
+                29 => self.current_flags &= !cell_flags::STRIKETHROUGH,
                 // Standard Foreground (30-37)
                 code @ 30..=37 => {
                     self.current_fg = Color::Ansi16((code - 30) as u8);
+                }
+                // Extended Foreground: 38;5;N (256 color) or 38;2;R;G;B (TrueColor)
+                38 => {
+                    if i + 2 < self.csi_param_count && self.csi_params[i + 1] == 5 {
+                        self.current_fg = Color::Ansi256(self.csi_params[i + 2] as u8);
+                        i += 2;
+                    } else if i + 4 < self.csi_param_count && self.csi_params[i + 1] == 2 {
+                        let r = self.csi_params[i + 2] as u8;
+                        let g = self.csi_params[i + 3] as u8;
+                        let b = self.csi_params[i + 4] as u8;
+                        self.current_fg = Color::Rgb(r, g, b);
+                        i += 4;
+                    }
                 }
                 39 => self.current_fg = Color::Default,
                 // Standard Background (40-47)
                 code @ 40..=47 => {
                     self.current_bg = Color::Ansi16((code - 40) as u8);
+                }
+                // Extended Background: 48;5;N (256 color) or 48;2;R;G;B (TrueColor)
+                48 => {
+                    if i + 2 < self.csi_param_count && self.csi_params[i + 1] == 5 {
+                        self.current_bg = Color::Ansi256(self.csi_params[i + 2] as u8);
+                        i += 2;
+                    } else if i + 4 < self.csi_param_count && self.csi_params[i + 1] == 2 {
+                        let r = self.csi_params[i + 2] as u8;
+                        let g = self.csi_params[i + 3] as u8;
+                        let b = self.csi_params[i + 4] as u8;
+                        self.current_bg = Color::Rgb(r, g, b);
+                        i += 4;
+                    }
                 }
                 49 => self.current_bg = Color::Default,
                 // Bright Foreground (90-97)
@@ -315,7 +511,7 @@ impl TerminalEmulator {
                 }
                 _ => {}
             }
+            i += 1;
         }
     }
 }
-

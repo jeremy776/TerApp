@@ -10,4 +10,5 @@ crate-type = ["cdylib", "rlib"]
 terapp-core = { path = "../terapp-core" }
 terapp-pty = { path = "../terapp-pty" }
 jni = { version = "0.21.1", default-features = false }
+libc = "0.2"
 

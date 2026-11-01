@@ -1,5 +1,7 @@
 package com.terapp
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -12,6 +14,8 @@ import android.view.*
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 
 class TerminalView @JvmOverloads constructor(
     context: Context,
@@ -42,9 +46,9 @@ class TerminalView @JvmOverloads constructor(
         }
 
     private val padH: Float
-        get() = 10f * resources.displayMetrics.density
+        get() = 8f * resources.displayMetrics.density
     private val padV: Float
-        get() = 6f * resources.displayMetrics.density
+        get() = 4f * resources.displayMetrics.density
 
     private fun spToPx(sp: Float): Float {
         return android.util.TypedValue.applyDimension(
@@ -129,6 +133,10 @@ class TerminalView @JvmOverloads constructor(
                 return true
             }
 
+            override fun onLongPress(e: MotionEvent) {
+                showContextMenuDialog()
+            }
+
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
                 if (scaleDetector.isInProgress) return false
                 val s = session ?: return false
@@ -161,6 +169,59 @@ class TerminalView @JvmOverloads constructor(
         })
 
         blinkHandler.postDelayed(blinkRunnable, 500)
+    }
+
+    private fun showContextMenuDialog() {
+        val options = arrayOf(
+            "Select All & Copy",
+            "Copy Visible Text",
+            "Paste Clipboard",
+            "Send Ctrl+C (Interrupt)",
+            "Send Reset",
+            "Scroll to Bottom"
+        )
+
+        AlertDialog.Builder(context)
+            .setTitle("Terminal Options")
+            .setItems(options) { _, which ->
+                val s = session ?: return@setItems
+                val clipMgr = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                when (which) {
+                    0 -> { // Select All & Copy
+                        val text = s.getVisibleText()
+                        if (text.isNotEmpty() && clipMgr != null) {
+                            clipMgr.setPrimaryClip(ClipData.newPlainText("TerApp Terminal", text))
+                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    1 -> { // Copy Visible
+                        val text = s.getVisibleText()
+                        if (text.isNotEmpty() && clipMgr != null) {
+                            clipMgr.setPrimaryClip(ClipData.newPlainText("TerApp Terminal", text))
+                            Toast.makeText(context, "Visible text copied", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    2 -> { // Paste
+                        val clip = clipMgr?.primaryClip
+                        if (clip != null && clip.itemCount > 0) {
+                            val pasteText = clip.getItemAt(0).coerceToText(context).toString()
+                            if (pasteText.isNotEmpty()) {
+                                s.writeInput(pasteText)
+                            }
+                        }
+                    }
+                    3 -> { // Ctrl+C
+                        s.writeBytes(byteArrayOf(0x03))
+                    }
+                    4 -> { // Reset
+                        s.writeBytes("\u001bc".toByteArray())
+                    }
+                    5 -> { // Scroll to bottom
+                        scrollToBottom()
+                    }
+                }
+            }
+            .show()
     }
 
     private fun updateFontMetrics() {
@@ -213,35 +274,72 @@ class TerminalView @JvmOverloads constructor(
         val pH = padH
         val pV = padV
 
-        // 1. Fill background
+        // 1. Draw terminal background
         bgPaint.color = theme.background
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
 
         val s = session ?: return
 
-        // 2. Draw text lines with scrollOffset
+        // 2. Draw text lines with native VT100 parsed colors & attributes
         for (row in 0 until rows) {
             val lineText = s.getLineText(row, scrollOffset)
             if (lineText.isNotEmpty()) {
                 val y = pV + row * charHeight + charAscent
                 val displayLine = if (lineText.length > cols) lineText.substring(0, cols) else lineText
-                val spans = TerminalColorizer.colorize(displayLine, theme.foreground, s.workingDir)
-                for (span in spans) {
-                    spanPaint.color = span.color
-                    spanPaint.isFakeBoldText = span.isBold
-                    spanPaint.isUnderlineText = span.isUnderline
-                    val startX = pH + span.start * charWidth
-                    if (startX < width - pH) {
-                        canvas.drawText(displayLine, span.start, span.end, startX, y, spanPaint)
+
+                val colors = s.getLineColors(
+                    row,
+                    scrollOffset,
+                    theme.foreground,
+                    theme.background,
+                    theme.ansiColors
+                )
+
+                if (colors != null && colors.size >= displayLine.length * 2) {
+                    var col = 0
+                    while (col < displayLine.length) {
+                        val fg = colors[col * 2]
+                        val flags = (colors[col * 2 + 1] ushr 24) and 0xFF
+                        val isBold = (flags and 1) != 0
+                        val isUnderline = (flags and (1 shl 3)) != 0
+
+                        spanPaint.color = fg
+                        spanPaint.isFakeBoldText = isBold
+                        spanPaint.isUnderlineText = isUnderline
+
+                        val startCol = col
+                        while (col < displayLine.length &&
+                            colors[col * 2] == fg &&
+                            ((colors[col * 2 + 1] ushr 24) and 0xFF) == flags
+                        ) {
+                            col++
+                        }
+
+                        val startX = pH + startCol * charWidth
+                        if (startX < width - pH) {
+                            canvas.drawText(displayLine, startCol, col, startX, y, spanPaint)
+                        }
+                    }
+                } else {
+                    // Fallback to TerminalColorizer
+                    val spans = TerminalColorizer.colorize(displayLine, theme.foreground, s.workingDir)
+                    for (span in spans) {
+                        spanPaint.color = span.color
+                        spanPaint.isFakeBoldText = span.isBold
+                        spanPaint.isUnderlineText = span.isUnderline
+                        val startX = pH + span.start * charWidth
+                        if (startX < width - pH) {
+                            canvas.drawText(displayLine, span.start, span.end, startX, y, spanPaint)
+                        }
                     }
                 }
             }
         }
 
-        // 3. Draw blinking cursor (only visible when viewing active prompt at bottom)
-        if (cursorVisible && scrollOffset == 0) {
-            val cx = s.getCursorX().coerceIn(0, cols - 1)
-            val cy = s.getCursorY().coerceIn(0, rows - 1)
+        // 3. Draw blinking cursor
+        if (cursorVisible && s.isCursorVisible() && scrollOffset == 0) {
+            val cx = s.getCursorX().coerceIn(0, (cols - 1).coerceAtLeast(0))
+            val cy = s.getCursorY().coerceIn(0, (rows - 1).coerceAtLeast(0))
 
             val left = pH + cx * charWidth
             val top = pV + cy * charHeight
@@ -261,7 +359,7 @@ class TerminalView @JvmOverloads constructor(
             }
         }
 
-        // 4. Draw scroll indicator bar when scrolled back
+        // 4. Draw modern scroll indicator bar when viewing scrollback history
         val maxOffset = s.getScrollbackLength()
         if (maxOffset > 0 && scrollOffset > 0) {
             val barWidth = 3f * resources.displayMetrics.density
@@ -271,7 +369,7 @@ class TerminalView @JvmOverloads constructor(
             val thumbTop = pV + (((maxOffset - scrollOffset).toFloat() / maxOffset) * (availHeight - thumbHeight))
             val right = width.toFloat() - 3f * resources.displayMetrics.density
             val left = right - barWidth
-            scrollBarPaint.color = 0x8838BDF8.toInt() // Soft cyan thumb
+            scrollBarPaint.color = 0x8838BDF8.toInt()
             canvas.drawRoundRect(left, thumbTop, right, thumbTop + thumbHeight, barWidth / 2f, barWidth / 2f, scrollBarPaint)
         }
     }
@@ -282,20 +380,36 @@ class TerminalView @JvmOverloads constructor(
         return true
     }
 
-    // --- Virtual Keyboard (IME) Integration ---
+    // --- Virtual Keyboard (IME) & Key Handling ---
 
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (event == null) return super.onKeyDown(keyCode, null)
         scrollToBottom()
+
+        // Handle Ctrl modifier on physical keyboards
+        if (event.isCtrlPressed) {
+            val unicode = event.unicodeChar
+            if (unicode in 'a'.code..'z'.code || unicode in 'A'.code..'Z'.code) {
+                val upper = unicode.toChar().uppercaseChar()
+                val ctrlByte = (upper.code - '@'.code).toByte()
+                session?.writeBytes(byteArrayOf(ctrlByte))
+                return true
+            }
+        }
+
         when (keyCode) {
             KeyEvent.KEYCODE_DEL -> {
-                session?.writeBytes(byteArrayOf(0x08))
+                session?.writeBytes(byteArrayOf(0x7F)) // Standard terminal backspace
+                return true
+            }
+            KeyEvent.KEYCODE_FORWARD_DEL -> {
+                session?.writeBytes("\u001b[3~".toByteArray())
                 return true
             }
             KeyEvent.KEYCODE_ENTER -> {
-                session?.writeBytes(byteArrayOf(0x0A))
+                session?.writeBytes(byteArrayOf(0x0D)) // CR (\r) for real PTY terminals
                 return true
             }
             KeyEvent.KEYCODE_TAB -> {
@@ -322,7 +436,40 @@ class TerminalView @JvmOverloads constructor(
                 session?.writeBytes("\u001b[C".toByteArray())
                 return true
             }
+            KeyEvent.KEYCODE_MOVE_HOME -> {
+                session?.writeBytes("\u001b[H".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_MOVE_END -> {
+                session?.writeBytes("\u001b[F".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_PAGE_UP -> {
+                session?.writeBytes("\u001b[5~".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_PAGE_DOWN -> {
+                session?.writeBytes("\u001b[6~".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_INSERT -> {
+                session?.writeBytes("\u001b[2~".toByteArray())
+                return true
+            }
+            KeyEvent.KEYCODE_F1 -> { session?.writeBytes("\u001bOP".toByteArray()); return true }
+            KeyEvent.KEYCODE_F2 -> { session?.writeBytes("\u001bOQ".toByteArray()); return true }
+            KeyEvent.KEYCODE_F3 -> { session?.writeBytes("\u001bOR".toByteArray()); return true }
+            KeyEvent.KEYCODE_F4 -> { session?.writeBytes("\u001bOS".toByteArray()); return true }
+            KeyEvent.KEYCODE_F5 -> { session?.writeBytes("\u001b[15~".toByteArray()); return true }
+            KeyEvent.KEYCODE_F6 -> { session?.writeBytes("\u001b[17~".toByteArray()); return true }
+            KeyEvent.KEYCODE_F7 -> { session?.writeBytes("\u001b[18~".toByteArray()); return true }
+            KeyEvent.KEYCODE_F8 -> { session?.writeBytes("\u001b[19~".toByteArray()); return true }
+            KeyEvent.KEYCODE_F9 -> { session?.writeBytes("\u001b[20~".toByteArray()); return true }
+            KeyEvent.KEYCODE_F10 -> { session?.writeBytes("\u001b[21~".toByteArray()); return true }
+            KeyEvent.KEYCODE_F11 -> { session?.writeBytes("\u001b[23~".toByteArray()); return true }
+            KeyEvent.KEYCODE_F12 -> { session?.writeBytes("\u001b[24~".toByteArray()); return true }
         }
+
         val unicode = event.unicodeChar
         if (unicode != 0) {
             sendChar(unicode.toChar())
@@ -348,54 +495,14 @@ class TerminalView @JvmOverloads constructor(
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
                 scrollToBottom()
                 if (beforeLength > 0) {
-                    session?.writeBytes(byteArrayOf(0x08)) // Backspace
+                    session?.writeBytes(byteArrayOf(0x7F))
                 }
                 return true
             }
 
             override fun sendKeyEvent(event: KeyEvent?): Boolean {
                 if (event?.action == KeyEvent.ACTION_DOWN) {
-                    scrollToBottom()
-                    when (event.keyCode) {
-                        KeyEvent.KEYCODE_DEL -> {
-                            session?.writeBytes(byteArrayOf(0x08))
-                            return true
-                        }
-                        KeyEvent.KEYCODE_ENTER -> {
-                            session?.writeBytes(byteArrayOf(0x0A)) // Enter \n
-                            return true
-                        }
-                        KeyEvent.KEYCODE_TAB -> {
-                            session?.writeBytes(byteArrayOf(0x09)) // Tab \t
-                            return true
-                        }
-                        KeyEvent.KEYCODE_ESCAPE -> {
-                            session?.writeBytes(byteArrayOf(0x1B)) // Esc
-                            return true
-                        }
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            session?.writeBytes("\u001b[A".toByteArray())
-                            return true
-                        }
-                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            session?.writeBytes("\u001b[B".toByteArray())
-                            return true
-                        }
-                        KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            session?.writeBytes("\u001b[D".toByteArray())
-                            return true
-                        }
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            session?.writeBytes("\u001b[C".toByteArray())
-                            return true
-                        }
-                    }
-
-                    val unicode = event.unicodeChar
-                    if (unicode != 0) {
-                        sendChar(unicode.toChar())
-                        return true
-                    }
+                    return this@TerminalView.onKeyDown(event.keyCode, event)
                 }
                 return super.sendKeyEvent(event)
             }
@@ -407,7 +514,6 @@ class TerminalView @JvmOverloads constructor(
         val (ctrl, alt) = extraKeysView?.consumeModifiers() ?: Pair(false, false)
 
         if (ctrl) {
-            // Apply Ctrl modifier (e.g. 'c' -> 0x03)
             val upper = c.uppercaseChar()
             if (upper in '@'..'_') {
                 val ctrlByte = (upper.code - '@'.code).toByte()
@@ -417,7 +523,6 @@ class TerminalView @JvmOverloads constructor(
         }
 
         if (alt) {
-            // Alt prepends ESC byte \x1b
             val bytes = byteArrayOf(0x1B, c.code.toByte())
             session?.writeBytes(bytes)
             return
@@ -431,6 +536,12 @@ class TerminalView @JvmOverloads constructor(
         when (key) {
             "ESC" -> session?.writeBytes(byteArrayOf(0x1B))
             "TAB" -> session?.writeBytes(byteArrayOf(0x09))
+            "HOME" -> session?.writeBytes("\u001b[H".toByteArray())
+            "END" -> session?.writeBytes("\u001b[F".toByteArray())
+            "PGUP" -> session?.writeBytes("\u001b[5~".toByteArray())
+            "PGDN" -> session?.writeBytes("\u001b[6~".toByteArray())
+            "INS" -> session?.writeBytes("\u001b[2~".toByteArray())
+            "DEL" -> session?.writeBytes("\u001b[3~".toByteArray())
             "↑" -> session?.writeBytes("\u001b[A".toByteArray())
             "↓" -> session?.writeBytes("\u001b[B".toByteArray())
             "←" -> session?.writeBytes("\u001b[D".toByteArray())
@@ -439,4 +550,3 @@ class TerminalView @JvmOverloads constructor(
         }
     }
 }
-

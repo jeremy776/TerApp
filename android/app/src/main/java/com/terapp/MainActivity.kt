@@ -3,14 +3,19 @@ package com.terapp
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
 
 class MainActivity : AppCompatActivity() {
@@ -30,7 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         } else {
@@ -76,10 +81,13 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             override fun onTabUnselected(tab: TabLayout.Tab?) {}
-            override fun onTabReselected(tab: TabLayout.Tab?) {}
+            override fun onTabReselected(tab: TabLayout.Tab?) {
+                // Tapping active tab prompts to rename
+                promptRenameActiveSession()
+            }
         })
 
-        // Create initial session
+        // Initialize userland & create initial session
         BootstrapManager.ensureBootstrap(this)
         createNewSession("Session 1")
 
@@ -87,25 +95,76 @@ class MainActivity : AppCompatActivity() {
         TerminalService.start(this, isWakeLockEnabled)
     }
 
-    private fun createNewSession(title: String) {
+    private fun createNewSession(title: String, isFailSafe: Boolean = false) {
         val home = BootstrapManager.getHomeDir(this)
         home.mkdirs()
+
+        val cols = if (terminalView.cols > 0) terminalView.cols else 80
+        val rows = if (terminalView.rows > 0) terminalView.rows else 24
+
         val newSession = TerminalSession(
             id = System.currentTimeMillis().toString(),
             name = title,
-            cols = terminalView.cols,
-            rows = terminalView.rows,
+            cols = cols,
+            rows = rows,
             workingDir = home,
-            context = this
+            context = this,
+            isFailSafe = isFailSafe
         )
+
+        val sessionIdx = sessions.size
         sessions.add(newSession)
 
         val tab = sessionTabs.newTab().setText(title)
         sessionTabs.addTab(tab)
 
+        // Setup session callbacks
+        newSession.onTitleChanged = { updatedTitle ->
+            runOnUiThread {
+                val idx = sessions.indexOf(newSession)
+                if (idx in 0 until sessionTabs.tabCount) {
+                    sessionTabs.getTabAt(idx)?.text = updatedTitle
+                    if (idx == activeSessionIndex) {
+                        topAppBar.subtitle = updatedTitle
+                    }
+                }
+            }
+        }
+
+        newSession.onBell = {
+            runOnUiThread {
+                triggerHapticBell()
+            }
+        }
+
+        newSession.onSessionFinished = { s ->
+            runOnUiThread {
+                val idx = sessions.indexOf(s)
+                if (idx in 0 until sessionTabs.tabCount) {
+                    sessionTabs.getTabAt(idx)?.text = "${s.name} [Exited]"
+                }
+            }
+        }
+
         switchToSession(sessions.size - 1)
         sessionTabs.selectTab(tab)
         terminalView.requestFocus()
+    }
+
+    private fun triggerHapticBell() {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+            vibratorManager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        } ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(40)
+        }
     }
 
     private fun switchToSession(index: Int) {
@@ -120,6 +179,34 @@ class MainActivity : AppCompatActivity() {
                 terminalViewSecondary.session = sessions[secondaryIdx]
             }
         }
+    }
+
+    private fun promptRenameActiveSession() {
+        if (sessions.isEmpty()) return
+        val current = sessions[activeSessionIndex]
+        val input = EditText(this).apply {
+            setText(current.name)
+            setSelection(text.length)
+        }
+        val container = FrameLayout(this).apply {
+            val pad = (20 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+            addView(input)
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.action_rename_session)
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotEmpty()) {
+                    current.name = newName
+                    sessionTabs.getTabAt(activeSessionIndex)?.text = newName
+                    topAppBar.subtitle = newName
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun closeActiveSession() {
@@ -148,6 +235,14 @@ class MainActivity : AppCompatActivity() {
                 createNewSession("Session ${sessions.size + 1}")
                 true
             }
+            R.id.action_failsafe_session -> {
+                createNewSession("FailSafe ${sessions.size + 1}", isFailSafe = true)
+                true
+            }
+            R.id.action_rename_session -> {
+                promptRenameActiveSession()
+                true
+            }
             R.id.action_copy -> {
                 copyTerminalOutput()
                 true
@@ -162,6 +257,14 @@ class MainActivity : AppCompatActivity() {
             }
             R.id.action_theme -> {
                 showThemeDialog()
+                true
+            }
+            R.id.action_zoom_in -> {
+                activeFocusedTerminal.fontSizeSp += 1.5f
+                true
+            }
+            R.id.action_zoom_out -> {
+                activeFocusedTerminal.fontSizeSp -= 1.5f
                 true
             }
             R.id.action_about -> {
@@ -247,7 +350,7 @@ class MainActivity : AppCompatActivity() {
         val themeNames = ThemeManager.THEMES.map { it.name }.toTypedArray()
         val currentIndex = ThemeManager.THEMES.indexOf(ThemeManager.currentTheme)
 
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle(R.string.menu_theme)
             .setSingleChoiceItems(themeNames, currentIndex) { dialog, which ->
                 ThemeManager.currentTheme = ThemeManager.THEMES[which]
@@ -260,14 +363,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAboutDialog() {
-        val arch = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-        val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+        val arch = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+        val dialog = MaterialAlertDialogBuilder(this)
             .setTitle("TerApp ${VersionManager.CURRENT_VERSION}")
             .setMessage(
-                "Modern Mobile Terminal\n\n" +
+                "Modern High-Performance Terminal\n\n" +
                 "• Version: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})\n" +
                 "• Architecture: $arch\n" +
-                "• Engine: Rust Native VT100 / ANSI CSI Parser\n" +
+                "• Engine: Native Rust VT100 / ANSI CSI Parser\n" +
+                "• PTY Subprocess: POSIX /dev/ptmx\n" +
                 "• Userland: BusyBox 1.36.1 POSIX + pkg Manager\n" +
                 "• Repository: github.com/jeremy776/TerApp\n\n" +
                 "Checking release status..."
@@ -291,10 +395,11 @@ class MainActivity : AppCompatActivity() {
                         "Update Available: $latestVer\nInstalled: ${VersionManager.CURRENT_VERSION}\nTap 'View Releases' to download."
                     }
                     dialog.setMessage(
-                        "Modern Mobile Terminal\n\n" +
+                        "Modern High-Performance Terminal\n\n" +
                         "• Version: ${VersionManager.CURRENT_VERSION} (Build ${VersionManager.BUILD_CODE})\n" +
                         "• Architecture: $arch\n" +
-                        "• Engine: Rust Native VT100 / ANSI CSI Parser\n" +
+                        "• Engine: Native Rust VT100 / ANSI CSI Parser\n" +
+                        "• PTY Subprocess: POSIX /dev/ptmx\n" +
                         "• Userland: BusyBox 1.36.1 POSIX + pkg Manager\n" +
                         "• Repository: github.com/jeremy776/TerApp\n\n" +
                         statusText
