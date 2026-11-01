@@ -17,8 +17,8 @@ android {
         // Targeting API 28 retains the platform capability to execute native binaries, applets,
         // package manager scripts, and user shell scripts.
         targetSdk = 28
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.2.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

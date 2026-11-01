@@ -115,11 +115,13 @@ jobs:
             * **Checksums:** `sha256sums.txt`
 
             #### 🚀 Highlights:
-            * **Native Rust VT100 Engine** (`libterapp_android.so`): CSI parser & circular ring scrollback buffer.
+            * **Real Linux POSIX PTY Engine (`terapp-pty`)**: Native `/dev/ptmx` allocation, UTF-8 raw mode, dynamic `TIOCSWINSZ` window sizing, and full interactive TUI support (`vi`, `nano`, `top`, `htop`, `less`, REPLs).
+            * **Zero-Allocation Rust VT100 Engine (`terapp-core`)**: Alternate Screen Buffer (`\e[?1049h`/`l`), 256 ANSI colors & 24-bit TrueColor RGB, cursor save/restore, and line/cell editing.
+            * **Fail-Safe Emergency Session**: Instant rescue shell targeting `/system/bin/sh` to recover from corrupted configurations.
+            * **Tactile Bell & Dynamic Title**: Haptic feedback on terminal bell (`\x07`) and dynamic OSC 0/2 window title extraction.
+            * **Expanded 26-Key Toolbar & Long-Press Menu**: Complete mobile keyboard access for navigation (`HOME`, `END`, `PGUP`, `PGDN`, `INS`, `DEL`), quotes, pipes, brackets, and sticky modifiers.
             * **Built-in POSIX Userland (BusyBox 1.36.1)**: Self-healing symlink engine in `usr/bin/` with 100+ applets (`ls`, `grep`, `vi`, `tar`, `curl`, `wget`, etc.).
-            * **Lightweight Package Manager (`pkg`)**: Built-in userland helper for listing, searching, installing applets and system diagnostics (`pkg doctor`).
-            * **Extended Color Themes**: Dracula, Catppuccin Mocha, One Dark, Nord, Monokai, Solarized Dark, Solarized Light, and Gruvbox Dark.
-            * **Gesture Scrolling & Fling**: Momentum-based inertial scrolling with virtual cyan scrollbar indicator.
-            * **Clipboard Support**: Copy screen and paste directly from action menu.
-            * **Split-Screen Panes**: Dual simultaneous terminal sessions side-by-side.
+            * **Lightweight Package Manager (`pkg`)**: Built-in helper for listing, searching, installing applets, environment diagnostics (`pkg doctor`), reinstall, and reset.
+            * **Dual-Pane Split-Screen & Multi-Session**: Independent simultaneous terminal sessions side-by-side.
+            * **Extended Color Themes**: 8 balanced palettes (Dracula, Catppuccin Mocha, One Dark, Nord, Monokai, Solarized Dark, Solarized Light, and Gruvbox Dark).
             * **Background Foreground Service**: Optional WakeLock support to keep long-running processes alive.
